@@ -1,4 +1,4 @@
-// sw.js - Service Worker pour Borlette Pro
+// sw.js - Service Worker pour Borlette Pro (Version corrigée - sans cache API)
 const CACHE_NAME = 'borlette-v1';
 const urlsToCache = [
   '/',
@@ -23,16 +23,21 @@ self.addEventListener('install', event => {
   );
 });
 
-// Interception des requêtes
+// Interception des requêtes - NE PAS CACHER LES API
 self.addEventListener('fetch', event => {
+  // Ne pas cacher les requêtes API
+  if (event.request.url.includes('/api/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
+  // Pour les fichiers statiques, utiliser le cache
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Retourne la réponse du cache si trouvée
         if (response) {
           return response;
         }
-        // Sinon, va chercher sur le réseau
         return fetch(event.request);
       })
   );
