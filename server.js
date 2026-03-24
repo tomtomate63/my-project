@@ -1,4 +1,4 @@
-// backend/server.js - Version Supabase
+// server.js - Version Supabase avec PWA
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -73,7 +73,7 @@ const server = http.createServer(async (req, res) => {
     
     // Servir les fichiers statiques
     if (url.startsWith('/agent-app/')) {
-        let filePath = path.join(__dirname, '..', 'agent-app', url.replace('/agent-app/', ''));
+        let filePath = path.join(__dirname, 'agent-app', url.replace('/agent-app/', ''));
         if (filePath.endsWith('/') || !path.extname(filePath)) {
             filePath = path.join(filePath, 'index.html');
         }
@@ -86,7 +86,7 @@ const server = http.createServer(async (req, res) => {
     }
     
     if (url.startsWith('/admin-app/')) {
-        let filePath = path.join(__dirname, '..', 'admin-app', url.replace('/admin-app/', ''));
+        let filePath = path.join(__dirname, 'admin-app', url.replace('/admin-app/', ''));
         if (filePath.endsWith('/') || !path.extname(filePath)) {
             filePath = path.join(filePath, 'index.html');
         }
@@ -94,6 +94,30 @@ const server = http.createServer(async (req, res) => {
         let contentType = 'text/html';
         if (ext === '.css') contentType = 'text/css';
         if (ext === '.js') contentType = 'application/javascript';
+        serveStaticFile(filePath, res, contentType);
+        return;
+    }
+    
+    // PWA - Servir manifest.json
+    if (url === '/manifest.json') {
+        let filePath = path.join(__dirname, 'manifest.json');
+        serveStaticFile(filePath, res, 'application/json');
+        return;
+    }
+    
+    // PWA - Servir sw.js
+    if (url === '/sw.js') {
+        let filePath = path.join(__dirname, 'sw.js');
+        serveStaticFile(filePath, res, 'application/javascript');
+        return;
+    }
+    
+    // PWA - Servir les icônes
+    if (url.startsWith('/icon/')) {
+        let filePath = path.join(__dirname, url);
+        const ext = path.extname(filePath);
+        let contentType = 'image/png';
+        if (ext === '.ico') contentType = 'image/x-icon';
         serveStaticFile(filePath, res, contentType);
         return;
     }

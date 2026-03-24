@@ -957,3 +957,13 @@ window.addEventListener('resize', function() {
         if (sidebar) sidebar.classList.remove('open');
     }
 });
+// Enregistrement du Service Worker pour PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(registration => {
+      console.log('Service Worker enregistré avec succès');
+    })
+    .catch(error => {
+      console.log('Erreur Service Worker:', error);
+    });
+}

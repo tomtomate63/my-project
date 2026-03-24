@@ -478,53 +478,14 @@ document.getElementById('inputAmount')?.addEventListener('keypress', function(e)
         addNumber();
     }
 });
-// Fonctions pour le menu mobile
-function toggleSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    const overlay = document.querySelector('.sidebar-overlay');
-    sidebar.classList.toggle('open');
-    overlay.classList.toggle('active');
+
+// Enregistrement du Service Worker pour PWA
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+        .then(registration => {
+            console.log('Service Worker enregistré avec succès');
+        })
+        .catch(error => {
+            console.log('Erreur Service Worker:', error);
+        });
 }
-
-function closeSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    const overlay = document.querySelector('.sidebar-overlay');
-    sidebar.classList.remove('open');
-    overlay.classList.remove('active');
-}
-
-// Fermer la sidebar après un clic sur un lien (sur mobile)
-function closeSidebarAfterClick() {
-    if (window.innerWidth <= 768) {
-        setTimeout(() => {
-            closeSidebar();
-        }, 300);
-    }
-}
-
-// Modifier la fonction showSection existante pour fermer la sidebar sur mobile
-const originalShowSection = showSection;
-window.showSection = function(section) {
-    originalShowSection(section);
-    closeSidebarAfterClick();
-}
-
-// Détecter la largeur de l'écran au chargement
-window.addEventListener('load', function() {
-    const menuToggle = document.querySelector('.menu-toggle');
-    if (window.innerWidth <= 768) {
-        menuToggle.style.display = 'block';
-    }
-});
-
-// Détecter le redimensionnement
-window.addEventListener('resize', function() {
-    const menuToggle = document.querySelector('.menu-toggle');
-    if (window.innerWidth <= 768) {
-        menuToggle.style.display = 'block';
-    } else {
-        menuToggle.style.display = 'none';
-        closeSidebar();
-        document.querySelector('.sidebar').classList.remove('open');
-    }
-});
