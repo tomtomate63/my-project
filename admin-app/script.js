@@ -118,7 +118,7 @@ async function loadDashboard() {
         const zoneData = await zoneRes.json();
         
         if (zoneData.success) {
-            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th></tr></thead><tbody>';
+            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead>汽<th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th></tr></thead><tbody>';
             for (const [zone, data] of Object.entries(zoneData.report)) {
                 zoneHtml += `<tr>
                     <td><strong>${zone}</strong></td>
@@ -177,20 +177,23 @@ async function loadUsers() {
                         </thead>
                         <tbody>
                             ${agentsData.agents.map(a => {
-                                const commission = (a.totalSales || 0) * 0.05;
+                                const totalSales = a.total_sales || a.totalSales || 0;
+                                const totalWins = a.totalWins || 0;
+                                const commission = totalSales * 0.05;
+                                const balance = a.balance || 0;
                                 return `
                                     <tr>
                                         <td>${a.id}</td>
-                                        <td><strong>${a.agentName || a.name}</strong><br><small>${a.username}</small></td>
+                                        <td><strong>${a.agent_name || a.agentName || a.name}</strong><br><small>${a.username}</small></td>
                                         <td>${a.zone}</td>
-                                        <td>${(a.totalSales || 0).toLocaleString()} GDS</td>
-                                        <td>${(a.totalWins || 0).toLocaleString()} GDS</td>
+                                        <td>${totalSales.toLocaleString()} GDS</td>
+                                        <td>${totalWins.toLocaleString()} GDS</td>
                                         <td class="commission-value">${commission.toLocaleString()} GDS</td>
-                                        <td>${(a.balance || 0).toLocaleString()} GDS</td>
-                                        <td><span class="${a.isBlocked ? 'agent-blocked' : 'agent-active'}">${a.isBlocked ? 'Bloqué' : 'Actif'}</span></td>
+                                        <td>${balance.toLocaleString()} GDS</td>
+                                        <td><span class="${a.is_blocked ? 'agent-blocked' : 'agent-active'}">${a.is_blocked ? 'Bloqué' : 'Actif'}</span></td>
                                         <td>
-                                            <button class="${a.isBlocked ? 'unblock-btn' : 'block-btn'}" onclick="toggleAgentBlock(${a.id}, ${!a.isBlocked})">
-                                                ${a.isBlocked ? 'Débloquer' : 'Bloquer'}
+                                            <button class="${a.is_blocked ? 'unblock-btn' : 'block-btn'}" onclick="toggleAgentBlock(${a.id}, ${!a.is_blocked})">
+                                                ${a.is_blocked ? 'Débloquer' : 'Bloquer'}
                                             </button>
                                         </td>
                                     </tr>
@@ -242,58 +245,66 @@ async function loadPaymentPoints() {
         const data = await response.json();
         
         if (data.success) {
+            // Calculer les totaux des ventes par zone
+            const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+            const agentsData = await agentsRes.json();
+            
+            // Calculer les ventes par zone
+            const salesByZone = {};
+            if (agentsData.success) {
+                agentsData.agents.forEach(agent => {
+                    const zone = agent.zone;
+                    const totalSales = agent.total_sales || agent.totalSales || 0;
+                    if (!salesByZone[zone]) salesByZone[zone] = 0;
+                    salesByZone[zone] += totalSales;
+                });
+            }
+            
             document.getElementById('paymentPointsList').innerHTML = `
                 <div class="table-responsive">
                     <table>
                         <thead>
-                            <tr><th>ID</th><th>Nom</th><th>Adresse</th><th>Département</th><th>Zone</th><th>Solde</th><th>Statut</th><th>Action</th></tr>
+                            <tr><th>ID</th><th>Nom</th><th>Adresse</th><th>Département</th><th>Zone</th><th>Solde (ventes - gains)</th><th>Statut</th><th>Action</th></tr>
                         </thead>
                         <tbody>
-                            ${data.paymentPoints.map(p => `
-                                <tr>
-                                    <td>${p.id}</td>
-                                    <td><strong>${p.nom}</strong></td>
-                                    <td>${p.adresse || '-'}</td>
-                                    <td>${p.departement || '-'}</td>
-                                    <td>${p.zone}</td>
-                                    <td>${p.balance.toLocaleString()} GDS</td>
-                                    <td><span class="${p.isActive ? 'agent-active' : 'agent-blocked'}">${p.isActive ? 'Actif' : 'Inactif'}</span></td>
-                                    <td>
-                                        <button class="${p.isActive ? 'block-btn' : 'unblock-btn'}" onclick="togglePaymentPoint(${p.id}, ${!p.isActive})">
-                                            ${p.isActive ? 'Désactiver' : 'Activer'}
-                                        </button>
-                                    </td>
-                                </tr>
-                            `).join('')}
+                            ${data.paymentPoints.map(p => {
+                                // Calculer le solde : ventes de la zone - gains
+                                const zoneSales = salesByZone[p.zone] || 0;
+                                const balance = p.balance || zoneSales;
+                                return `
+                                    <tr>
+                                        <td>${p.id}</td>
+                                        <td><strong>${p.nom}</strong></td>
+                                        <td>${p.adresse || '-'}</td>
+                                        <td>${p.departement || '-'}</td>
+                                        <td>${p.zone}</td>
+                                        <td>${balance.toLocaleString()} GDS</td>
+                                        <td><span class="${p.isActive ? 'agent-active' : 'agent-blocked'}">${p.isActive ? 'Actif' : 'Inactif'}</span></td>
+                                        <td>
+                                            <button class="${p.isActive ? 'block-btn' : 'unblock-btn'}" onclick="togglePaymentPoint(${p.id}, ${!p.isActive})">
+                                                ${p.isActive ? 'Désactiver' : 'Activer'}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>
             `;
             
-            const pointSelect = document.getElementById('depositPointId');
-            const transferFrom = document.getElementById('transferFrom');
-            const transferTo = document.getElementById('transferTo');
-            const payPointSelect = document.getElementById('payPaymentPoint');
-            
+            // Remplir les select
             const activePoints = data.paymentPoints.filter(p => p.isActive);
-            if (pointSelect) {
-                pointSelect.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
-            }
-            if (transferFrom) {
-                transferFrom.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
-            }
-            if (transferTo) {
-                transferTo.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
-            }
-            if (payPointSelect) {
-                payPointSelect.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
-            }
+            const selects = ['depositPointId', 'transferFrom', 'transferTo', 'payPaymentPoint'];
+            selects.forEach(id => {
+                const select = document.getElementById(id);
+                if (select) select.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
+            });
         }
     } catch (error) {
         console.error('Erreur:', error);
     }
 }
-
 async function loadLimits() {
     try {
         const response = await fetch(`${API_BASE_URL}/api/number-limits`);
@@ -302,44 +313,6 @@ async function loadLimits() {
         if (data.success) {
             const limits = data.limits;
             document.getElementById('limitsSettings').innerHTML = `
-                <div class="limit-card">
-                    <h4>Lottery 2 chiffres (00-99)</h4>
-                    <label>
-                        <input type="checkbox" id="simpleEnabled" ${limits.simple.enabled ? 'checked' : ''}>
-                        Activer les limites
-                    </label>
-                    <textarea id="simpleBlocked" placeholder="Numéros bloqués (séparés par virgule)" rows="3">${limits.simple.blockedNumbers.join(', ')}</textarea>
-                    <button onclick="updateLimit('simple', document.getElementById('simpleEnabled').checked, document.getElementById('simpleBlocked').value)">Sauvegarder</button>
-                </div>
-                <div class="limit-card">
-                    <h4>Lottery 3 chiffres (000-999)</h4>
-                    <label>
-                        <input type="checkbox" id="threeEnabled" ${limits.three.enabled ? 'checked' : ''}>
-                        Activer les limites
-                    </label>
-                    <textarea id="threeBlocked" placeholder="Numéros bloqués (séparés par virgule)" rows="3">${limits.three.blockedNumbers.join(', ')}</textarea>
-                    <button onclick="updateLimit('three', document.getElementById('threeEnabled').checked, document.getElementById('threeBlocked').value)">Sauvegarder</button>
-                </div>
-                <div class="limit-card">
-                    <h4>Lottery 5 chiffres (00000-99999)</h4>
-                    <label>
-                        <input type="checkbox" id="fiveEnabled" ${limits.five.enabled ? 'checked' : ''}>
-                        Activer les limites
-                    </label>
-                    <textarea id="fiveBlocked" placeholder="Numéros bloqués (séparés par virgule)" rows="3">${limits.five.blockedNumbers.join(', ')}</textarea>
-                    <button onclick="updateLimit('five', document.getElementById('fiveEnabled').checked, document.getElementById('fiveBlocked').value)">Sauvegarder</button>
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Erreur:', error);
-    }
-}
-
-async function updateLimit(type, enabled, blockedStr) {
-    const blockedNumbers = blockedStr.split(',').map(s => s.trim()).filter(s => s);
-    
-    try {
         await fetch(`${API_BASE_URL}/api/update-number-limits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -356,18 +329,10 @@ async function loadReports() {
     try {
         const zoneRes = await fetch(`${API_BASE_URL}/api/reports/by-zone`);
         const zoneData = await zoneRes.json();
-        
         if (zoneData.success) {
             let zoneHtml = '<div class="table-responsive"><table><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th><th>Agents</th></tr></thead><tbody>';
             for (const [zone, data] of Object.entries(zoneData.report)) {
-                zoneHtml += `<tr>
-                    <td><strong>${zone}</strong></td>
-                    <td>${data.totalSales.toLocaleString()} GDS</td>
-                    <td>${data.totalWins.toLocaleString()} GDS</td>
-                    <td>${data.totalCommission.toLocaleString()} GDS</td>
-                    <td>${data.netProfit.toLocaleString()} GDS</td>
-                    <td>${data.agentsCount}</td>
-                </tr>`;
+                zoneHtml += `<tr><td><strong>${zone}</strong></td><td>${data.totalSales.toLocaleString()} GDS</td><td>${data.totalWins.toLocaleString()} GDS</td><td>${data.totalCommission.toLocaleString()} GDS</td><td>${data.netProfit.toLocaleString()} GDS</td><td>${data.agentsCount}</td></tr>`;
             }
             zoneHtml += '</tbody></table></div>';
             document.getElementById('reportsByZone').innerHTML = zoneHtml;
@@ -375,18 +340,10 @@ async function loadReports() {
         
         const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
         const agentsData = await agentsRes.json();
-        
         if (agentsData.success) {
             let agentHtml = '<div class="table-responsive"><table><thead><tr><th>Agent</th><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commission</th><th>Solde</th></tr></thead><tbody>';
             agentsData.agents.forEach(a => {
-                agentHtml += `<tr>
-                    <td><strong>${a.agentName || a.name}</strong><br><small>${a.username}</small></td>
-                    <td>${a.zone}</td>
-                    <td>${(a.totalSales || 0).toLocaleString()} GDS</td>
-                    <td>${(a.totalWins || 0).toLocaleString()} GDS</td>
-                    <td>${(a.commission || 0).toLocaleString()} GDS</td>
-                    <td>${(a.balance || 0).toLocaleString()} GDS</td>
-                </tr>`;
+                agentHtml += `<tr><td><strong>${a.agentName || a.name}</strong><br><small>${a.username}</small></td><td>${a.zone}</td><td>${(a.totalSales || 0).toLocaleString()} GDS</td><td>${(a.totalWins || 0).toLocaleString()} GDS</td><td>${(a.commission || 0).toLocaleString()} GDS</td><td>${(a.balance || 0).toLocaleString()} GDS</td></tr>`;
             });
             agentHtml += '</tbody></table></div>';
             document.getElementById('reportsByAgent').innerHTML = agentHtml;
@@ -432,13 +389,7 @@ async function loadTransactions() {
 }
 
 function getTransactionTypeIcon(type) {
-    const icons = {
-        vente: '💰',
-        dechargement: '💵',
-        transfert: '🔄',
-        gain: '🏆',
-        annulation: '❌'
-    };
+    const icons = { vente: '💰', dechargement: '💵', transfert: '🔄', gain: '🏆', annulation: '❌' };
     return icons[type] || '📋';
 }
 
@@ -465,9 +416,7 @@ async function loadAllTickets() {
                 else if (t.isWinner) statusBadge = `<span class="winner-badge">Gagnant ${t.winAmount} GDS ${!t.isPaid ? '⚠️ Non payé' : '✅ Payé'}</span>`;
                 else statusBadge = '<span class="pending-badge">En attente</span>';
                 
-                const itemsHtml = t.items ? 
-                    t.items.map(i => `<div>${i.number} : ${i.amount} GDS</div>`).join('') : 
-                    `<div>${t.number} : ${t.amount} GDS</div>`;
+                const itemsHtml = t.items ? t.items.map(i => `<div>${i.number} : ${i.amount} GDS</div>`).join('') : `<div>${t.number} : ${t.amount} GDS</div>`;
                 
                 return `
                     <div class="ticket-item ${t.isCancelled ? 'cancelled' : (t.isWinner ? 'winner' : '')}">
@@ -494,14 +443,24 @@ async function loadPaymentControl() {
         const pointsRes = await fetch(`${API_BASE_URL}/api/payment-points`);
         const pointsData = await pointsRes.json();
         
+        const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+        const agentsData = await agentsRes.json();
+        
+        const salesByZone = {};
+        if (agentsData.success) {
+            agentsData.agents.forEach(agent => {
+                const zone = agent.zone;
+                const totalSales = agent.total_sales || agent.totalSales || 0;
+                if (!salesByZone[zone]) salesByZone[zone] = 0;
+                salesByZone[zone] += totalSales;
+            });
+        }
+        
         if (pointsData.success) {
-            let html = '<div class="table-responsive"><table><thead><tr><th>Point de paiement</th><th>Solde actuel</th><th>Total des gains payés</th></tr></thead><tbody>';
+            let html = '<div class="table-responsive"><table><thead><tr><th>Point de paiement</th><th>Solde actuel</th><th>Ventes de la zone</th></tr></thead><tbody>';
             pointsData.paymentPoints.forEach(p => {
-                html += `<tr>
-                    <td><strong>${p.nom}</strong></td>
-                    <td>${p.balance.toLocaleString()} GDS</td>
-                    <td>À calculer</td>
-                </tr>`;
+                const zoneSales = salesByZone[p.zone] || 0;
+                html += `<tr><td><strong>${p.nom}</strong></td><td>${p.balance.toLocaleString()} GDS</td><td>${zoneSales.toLocaleString()} GDS</td></tr>`;
             });
             html += '</tbody></table></div>';
             document.getElementById('paymentControl').innerHTML = html;
@@ -521,13 +480,9 @@ async function loadCommissions() {
         if (agentsData.success) {
             let html = '<div class="table-responsive"><table><thead><tr><th>Agent</th><th>Zone</th><th>Commission (5%)</th><th>Total ventes</th></tr></thead><tbody>';
             agentsData.agents.forEach(a => {
-                const commission = (a.totalSales || 0) * 0.05;
-                html += `<tr>
-                    <td><strong>${a.agentName || a.name}</strong><br><small>${a.username}</small></td>
-                    <td>${a.zone}</td>
-                    <td class="commission-value">${commission.toLocaleString()} GDS</td>
-                    <td>${(a.totalSales || 0).toLocaleString()} GDS</td>
-                </tr>`;
+                const totalSales = a.total_sales || a.totalSales || 0;
+                const commission = totalSales * 0.05;
+                html += `<tr><td><strong>${a.agent_name || a.agentName || a.name}</strong><br><small>${a.username}</small></td><td>${a.zone}</td><td class="commission-value">${commission.toLocaleString()} GDS</td><td>${totalSales.toLocaleString()} GDS</td></tr>`;
             });
             html += '</tbody></table></div>';
             document.getElementById('agentCommissions').innerHTML = html;
@@ -537,12 +492,24 @@ async function loadCommissions() {
         const pointsData = await pointsRes.json();
         
         if (pointsData.success) {
-            let html = '<div class="table-responsive"><table><thead><tr><th>Point de paiement</th><th>Commission totale</th></tr></thead><tbody>';
+            // Calculer les commissions par zone
+            const agentsRes2 = await fetch(`${API_BASE_URL}/api/agents`);
+            const agentsData2 = await agentsRes2.json();
+            const commissionByZone = {};
+            if (agentsData2.success) {
+                agentsData2.agents.forEach(a => {
+                    const zone = a.zone;
+                    const totalSales = a.total_sales || a.totalSales || 0;
+                    const commission = totalSales * 0.05;
+                    if (!commissionByZone[zone]) commissionByZone[zone] = 0;
+                    commissionByZone[zone] += commission;
+                });
+            }
+            
+            let html = '<div class="table-responsive"><table><thead><tr><th>Point de paiement</th><th>Zone</th><th>Commission totale</th></tr></thead><tbody>';
             pointsData.paymentPoints.forEach(p => {
-                html += `<tr>
-                    <td><strong>${p.nom}</strong></td>
-                    <td>À calculer</td>
-                </tr>`;
+                const zoneCommission = commissionByZone[p.zone] || 0;
+                html += `<tr><td><strong>${p.nom}</strong></td><td>${p.zone}</td><td>${zoneCommission.toLocaleString()} GDS</td></tr>`;
             });
             html += '</tbody></table></div>';
             document.getElementById('paymentPointCommissions').innerHTML = html;
@@ -882,7 +849,6 @@ async function saveDrawing() {
 async function payTicket(ticketId) {
     const paymentPointId = prompt('Entrez l\'ID du point de paiement pour ce paiement:');
     if (!paymentPointId) return;
-    
     try {
         alert(`Ticket ${ticketId} marqué comme payé au point ${paymentPointId}`);
         loadAllTickets();
@@ -914,7 +880,6 @@ function adminLogout() {
 }
 
 // ========== FONCTIONS POUR MENU MOBILE ==========
-
 function toggleSidebar() {
     const sidebar = document.querySelector('.sidebar');
     const overlay = document.querySelector('.sidebar-overlay');
@@ -929,41 +894,30 @@ function closeSidebar() {
     if (overlay) overlay.classList.remove('active');
 }
 
-// Fermer la sidebar après un clic sur un lien (sur mobile)
 function closeSidebarAfterClick() {
     if (window.innerWidth <= 768) {
-        setTimeout(() => {
-            closeSidebar();
-        }, 300);
+        setTimeout(() => closeSidebar(), 300);
     }
 }
 
 // ========== INITIALISATION DES FILTRES ==========
 document.addEventListener('DOMContentLoaded', function() {
-    // Filtres tickets
     const searchTicket = document.getElementById('searchTicket');
     const filterZone = document.getElementById('filterZone');
     const filterStatus = document.getElementById('filterStatus');
-    
     if (searchTicket) searchTicket.addEventListener('input', loadAllTickets);
     if (filterZone) filterZone.addEventListener('change', loadAllTickets);
     if (filterStatus) filterStatus.addEventListener('change', loadAllTickets);
     
-    // Filtres transactions
     const filterTransaction = document.getElementById('filterTransaction');
     const filterTransactionType = document.getElementById('filterTransactionType');
-    
     if (filterTransaction) filterTransaction.addEventListener('input', loadTransactions);
     if (filterTransactionType) filterTransactionType.addEventListener('change', loadTransactions);
     
-    // Gestion du menu mobile
     const menuToggle = document.querySelector('.menu-toggle');
-    if (window.innerWidth <= 768) {
-        if (menuToggle) menuToggle.style.display = 'block';
-    }
+    if (window.innerWidth <= 768 && menuToggle) menuToggle.style.display = 'block';
 });
 
-// Gérer le redimensionnement de la fenêtre
 window.addEventListener('resize', function() {
     const menuToggle = document.querySelector('.menu-toggle');
     if (window.innerWidth <= 768) {
@@ -975,6 +929,7 @@ window.addEventListener('resize', function() {
         if (sidebar) sidebar.classList.remove('open');
     }
 });
+
 // ========== CONNEXION AVEC TOUCHE ENTREE ==========
 document.addEventListener('DOMContentLoaded', function() {
     const usernameInput = document.getElementById('username');
@@ -983,20 +938,24 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleEnter(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            login();
+            adminLogin();
         }
     }
     
     if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
     if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
 });
-// Enregistrement du Service Worker pour PWA
+
+// ========== SERVICE WORKER PWA ==========
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js')
-    .then(registration => {
-      console.log('Service Worker enregistré avec succès');
-    })
-    .catch(error => {
-      console.log('Erreur Service Worker:', error);
-    });
+    navigator.serviceWorker.register('/sw.js')
+        .then(registration => console.log('Service Worker enregistré avec succès'))
+        .catch(error => console.log('Erreur Service Worker:', error));
 }
+// ========== CONNEXION AVEC TOUCHE ENTREE ==========
+document.getElementById('username')?.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') adminLogin();
+});
+document.getElementById('password')?.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') adminLogin();
+});
