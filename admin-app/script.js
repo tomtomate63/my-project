@@ -118,7 +118,7 @@ async function loadDashboard() {
         const zoneData = await zoneRes.json();
         
         if (zoneData.success) {
-            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead>汽<th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th></tr></thead><tbody>';
+            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th></tr></thead><tbody>';
             for (const [zone, data] of Object.entries(zoneData.report)) {
                 zoneHtml += `<tr>
                     <td><strong>${zone}</strong></td>
@@ -268,7 +268,6 @@ async function loadPaymentPoints() {
                         </thead>
                         <tbody>
                             ${data.paymentPoints.map(p => {
-                                // Calculer le solde : ventes de la zone - gains
                                 const zoneSales = salesByZone[p.zone] || 0;
                                 const balance = p.balance || zoneSales;
                                 return `
@@ -305,6 +304,7 @@ async function loadPaymentPoints() {
         console.error('Erreur:', error);
     }
 }
+
 async function loadLimits() {
     try {
         const response = await fetch(`${API_BASE_URL}/api/number-limits`);
@@ -313,6 +313,35 @@ async function loadLimits() {
         if (data.success) {
             const limits = data.limits;
             document.getElementById('limitsSettings').innerHTML = `
+                <div class="limit-card">
+                    <h4>Lottery 2 chiffres (00-99)</h4>
+                    <label><input type="checkbox" id="simpleEnabled" ${limits.simple.enabled ? 'checked' : ''}> Activer les limites</label>
+                    <textarea id="simpleBlocked" placeholder="Numéros bloqués (séparés par virgule)" rows="3">${limits.simple.blockedNumbers.join(', ')}</textarea>
+                    <button onclick="updateLimit('simple', document.getElementById('simpleEnabled').checked, document.getElementById('simpleBlocked').value)">Sauvegarder</button>
+                </div>
+                <div class="limit-card">
+                    <h4>Lottery 3 chiffres (000-999)</h4>
+                    <label><input type="checkbox" id="threeEnabled" ${limits.three.enabled ? 'checked' : ''}> Activer les limites</label>
+                    <textarea id="threeBlocked" placeholder="Numéros bloqués (séparés par virgule)" rows="3">${limits.three.blockedNumbers.join(', ')}</textarea>
+                    <button onclick="updateLimit('three', document.getElementById('threeEnabled').checked, document.getElementById('threeBlocked').value)">Sauvegarder</button>
+                </div>
+                <div class="limit-card">
+                    <h4>Lottery 5 chiffres (00000-99999)</h4>
+                    <label><input type="checkbox" id="fiveEnabled" ${limits.five.enabled ? 'checked' : ''}> Activer les limites</label>
+                    <textarea id="fiveBlocked" placeholder="Numéros bloqués (séparés par virgule)" rows="3">${limits.five.blockedNumbers.join(', ')}</textarea>
+                    <button onclick="updateLimit('five', document.getElementById('fiveEnabled').checked, document.getElementById('fiveBlocked').value)">Sauvegarder</button>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+async function updateLimit(type, enabled, blockedStr) {
+    const blockedNumbers = blockedStr.split(',').map(s => s.trim()).filter(s => s);
+    
+    try {
         await fetch(`${API_BASE_URL}/api/update-number-limits`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -492,7 +521,6 @@ async function loadCommissions() {
         const pointsData = await pointsRes.json();
         
         if (pointsData.success) {
-            // Calculer les commissions par zone
             const agentsRes2 = await fetch(`${API_BASE_URL}/api/agents`);
             const agentsData2 = await agentsRes2.json();
             const commissionByZone = {};
@@ -952,10 +980,3 @@ if ('serviceWorker' in navigator) {
         .then(registration => console.log('Service Worker enregistré avec succès'))
         .catch(error => console.log('Erreur Service Worker:', error));
 }
-// ========== CONNEXION AVEC TOUCHE ENTREE ==========
-document.getElementById('username')?.addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') adminLogin();
-});
-document.getElementById('password')?.addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') adminLogin();
-});
