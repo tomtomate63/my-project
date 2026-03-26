@@ -478,6 +478,21 @@ document.getElementById('inputAmount')?.addEventListener('keypress', function(e)
         addNumber();
     }
 });
+// ========== CONNEXION AVEC TOUCHE ENTREE ==========
+document.addEventListener('DOMContentLoaded', function() {
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    
+    function handleEnter(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            login();
+        }
+    }
+    
+    if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
+    if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
+});
 
 // Enregistrement du Service Worker pour PWA
 if ('serviceWorker' in navigator) {
