@@ -113,14 +113,15 @@ const server = http.createServer(async (req, res) => {
     }
     
     // PWA - Servir les icônes
-    if (url.startsWith('/icon/')) {
-        let filePath = path.join(__dirname, url);
-        const ext = path.extname(filePath);
-        let contentType = 'image/png';
-        if (ext === '.ico') contentType = 'image/x-icon';
-        serveStaticFile(filePath, res, contentType);
-        return;
-    }
+if (url.startsWith('/icon/')) {
+    let filePath = path.join(__dirname, url);
+    // console.log('Tentative de servir:', filePath); ← SUPPRIME CETTE LIGNE
+    const ext = path.extname(filePath);
+    let contentType = 'image/png';
+    if (ext === '.ico') contentType = 'image/x-icon';
+    serveStaticFile(filePath, res, contentType);
+    return;
+}
     
     if (url === '/') {
         res.writeHead(302, { 'Location': '/agent-app/index.html' });
