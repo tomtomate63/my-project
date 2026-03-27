@@ -691,3 +691,99 @@ tr:hover {
         width: calc(100% - 240px);
     }
 }
+/* ========== BOUTON MODE SOMBRE ========== */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.dark-mode-btn {
+    background: #f0f0f0;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dark-mode-btn:hover {
+    transform: scale(1.05);
+}
+
+/* ========== MODE SOMBRE ========== */
+body.dark-mode {
+    background: #1a1a2e;
+}
+
+body.dark-mode .card,
+body.dark-mode .header,
+body.dark-mode .stat-box,
+body.dark-mode .ticket-item,
+body.dark-mode .transaction-item,
+body.dark-mode .limit-card {
+    background: #16213e;
+    color: #e0e0e0;
+    border-color: #2a2a3e;
+}
+
+body.dark-mode .card h3,
+body.dark-mode .header h1,
+body.dark-mode .stat-label,
+body.dark-mode .ticket-footer {
+    color: #ff6b6b;
+}
+
+body.dark-mode th {
+    background: #0f0f1a;
+    color: #ff6b6b;
+}
+
+body.dark-mode td {
+    border-bottom-color: #2a2a3e;
+    color: #e0e0e0;
+}
+
+body.dark-mode .form-group input,
+body.dark-mode .form-group select,
+body.dark-mode .form-group textarea {
+    background: #0f0f1a;
+    border-color: #2a2a3e;
+    color: #e0e0e0;
+}
+
+body.dark-mode .form-group label {
+    color: #ff6b6b;
+}
+
+body.dark-mode .btn-primary {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+}
+
+body.dark-mode .stat-card {
+    background: linear-gradient(135deg, #2a2a4e 0%, #1e1e3a 100%);
+}
+
+body.dark-mode .sidebar {
+    background: linear-gradient(180deg, #0f0f1a 0%, #0a0a12 100%);
+}
+
+body.dark-mode .login-box {
+    background: #16213e;
+    color: #e0e0e0;
+}
+
+body.dark-mode .login-box h1 {
+    color: #ff6b6b;
+}
+
+body.dark-mode .login-box input {
+    background: #0f0f1a;
+    border-color: #2a2a3e;
+    color: #e0e0e0;
+}

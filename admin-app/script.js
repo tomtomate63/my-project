@@ -973,6 +973,35 @@ document.addEventListener('DOMContentLoaded', function() {
     if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
     if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
 });
+// ========== MODE SOMBRE ==========
+function initDarkMode() {
+    const darkMode = localStorage.getItem('darkMode');
+    if (darkMode === 'enabled') {
+        document.body.classList.add('dark-mode');
+        const toggleBtn = document.getElementById('darkModeToggle');
+        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-sun"></i>';
+    }
+}
+
+function toggleDarkMode() {
+    const toggleBtn = document.getElementById('darkModeToggle');
+    if (document.body.classList.contains('dark-mode')) {
+        document.body.classList.remove('dark-mode');
+        localStorage.setItem('darkMode', 'disabled');
+        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-moon"></i>';
+    } else {
+        document.body.classList.add('dark-mode');
+        localStorage.setItem('darkMode', 'enabled');
+        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-sun"></i>';
+    }
+}
+
+// Initialiser au chargement
+document.addEventListener('DOMContentLoaded', function() {
+    initDarkMode();
+    const toggleBtn = document.getElementById('darkModeToggle');
+    if (toggleBtn) toggleBtn.addEventListener('click', toggleDarkMode);
+});
 
 // ========== SERVICE WORKER PWA ==========
 if ('serviceWorker' in navigator) {
