@@ -997,9 +997,3 @@ window.addEventListener('resize', function() {
     }
 });
 
-// ========== SERVICE WORKER PWA ==========
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js')
-        .then(registration => console.log('Service Worker enregistré avec succès'))
-        .catch(error => console.log('Erreur Service Worker:', error));
-}
