@@ -1,4 +1,4 @@
-// sw.js - Service Worker pour Borlette Pro (Version corrigée - sans cache API)
+// sw.js - Service Worker pour Borlette Pro
 const CACHE_NAME = 'borlette-v1';
 const urlsToCache = [
   '/',
@@ -8,8 +8,7 @@ const urlsToCache = [
   '/admin-app/index.html',
   '/admin-app/script.js',
   '/admin-app/style.css',
-  '/manifest.json',
-  '/icon/icon-100.png'
+  '/manifest.json'
 ];
 
 // Installation
@@ -18,7 +17,14 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Cache ouvert');
-        return cache.addAll(urlsToCache);
+        // Ajouter chaque fichier un par un pour éviter l'erreur
+        return Promise.all(
+          urlsToCache.map(url => {
+            return cache.add(url).catch(err => {
+              console.log('Impossible de mettre en cache:', url, err);
+            });
+          })
+        );
       })
   );
 });
