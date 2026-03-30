@@ -4,7 +4,7 @@ const urlsToCache = [
   '/',
   '/agent-app/index.html',
   '/agent-app/script.js',
-  '/agent-app/style.css',
+'/agent-app/style.css',
   '/admin-app/index.html',
   '/admin-app/script.js',
   '/admin-app/style.css',
@@ -17,7 +17,6 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Cache ouvert');
-        // Ajouter chaque fichier un par un pour éviter l'erreur
         return Promise.all(
           urlsToCache.map(url => {
             return cache.add(url).catch(err => {
@@ -29,11 +28,10 @@ self.addEventListener('install', event => {
   );
 });
 
-// Interception des requêtes - NE PAS CACHER LES API
+// Interception des requêtes
 self.addEventListener('fetch', event => {
-  // Ne pas cacher les requêtes API
+  // Ignorer toutes les requêtes API
   if (event.request.url.includes('/api/')) {
-    event.respondWith(fetch(event.request));
     return;
   }
   
@@ -49,7 +47,7 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Mise à jour - supprime l'ancien cache
+// Mise à jour
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => {
