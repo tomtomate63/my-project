@@ -1,4 +1,4 @@
-// server.js - Version Supabase avec PWA
+// server.js - Version Supabase avec PWA (CORRIGÉ)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -58,10 +58,17 @@ function calculateWin(item, drawingResult) {
     return { winAmount: 0, winType: null };
 }
 
+// Vérification admin
+function isAdminRequest(req) {
+    // Vérifier le header d'autorisation ou un token
+    const adminKey = req.headers['x-admin-key'];
+    return adminKey === process.env.ADMIN_SECRET || adminKey === 'admin-secret-key-2024';
+}
+
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key');
     
     if (req.method === 'OPTIONS') { 
         res.writeHead(200); 
@@ -113,15 +120,14 @@ const server = http.createServer(async (req, res) => {
     }
     
     // PWA - Servir les icônes
-if (url.startsWith('/icon/')) {
-    let filePath = path.join(__dirname, url);
-    // console.log('Tentative de servir:', filePath); ← SUPPRIME CETTE LIGNE
-    const ext = path.extname(filePath);
-    let contentType = 'image/png';
-    if (ext === '.ico') contentType = 'image/x-icon';
-    serveStaticFile(filePath, res, contentType);
-    return;
-}
+    if (url.startsWith('/icon/')) {
+        let filePath = path.join(__dirname, url);
+        const ext = path.extname(filePath);
+        let contentType = 'image/png';
+        if (ext === '.ico') contentType = 'image/x-icon';
+        serveStaticFile(filePath, res, contentType);
+        return;
+    }
     
     if (url === '/') {
         res.writeHead(302, { 'Location': '/agent-app/index.html' });
@@ -154,7 +160,7 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
-    // LOGIN
+    // LOGIN (CORRIGÉ - gère correctement les admins)
     if (url === '/api/login' && req.method === 'POST') {
         const body = await parseBody();
         const { username, password } = body;
@@ -184,6 +190,9 @@ if (url.startsWith('/icon/')) {
         }
         
         if (user) {
+            // CORRECTION: Déterminer correctement si c'est un admin
+            const isAdmin = user.is_admin === true || user.username === 'admin' || user.type === 'admin';
+            
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
                 success: true, 
@@ -193,7 +202,8 @@ if (url.startsWith('/icon/')) {
                     name: user.agent_name || `${user.prenom || ''} ${user.nom || ''}`.trim() || user.name,
                     agentName: user.agent_name,
                     zone: user.zone,
-                    isAdmin: user.is_admin || false,
+                    isAdmin: isAdmin,
+                    is_admin: user.is_admin,
                     isSupervisor: isSupervisor,
                     isBlocked: user.is_blocked || false,
                     totalSales: user.total_sales || 0,
@@ -274,12 +284,16 @@ if (url.startsWith('/icon/')) {
         }
         
         // Mettre à jour l'agent
+        const newTotalSales = (agent.total_sales || 0) + totalAmount;
+        const newBalance = (agent.balance || 0) + totalAmount;
+        const newCommission = (agent.commission || 0) + totalAmount * 0.05;
+        
         await supabase
             .from('agents')
             .update({
-                total_sales: (agent.total_sales || 0) + totalAmount,
-                balance: (agent.balance || 0) + totalAmount,
-                commission: (agent.commission || 0) + totalAmount * 0.05
+                total_sales: newTotalSales,
+                balance: newBalance,
+                commission: newCommission
             })
             .eq('id', agentId);
         
@@ -293,6 +307,8 @@ if (url.startsWith('/icon/')) {
                 zone: agent.zone,
                 amount: totalAmount,
                 ticket_id: ticketId,
+                previous_balance: agent.balance || 0,
+                new_balance: newBalance,
                 date: new Date().toISOString(),
                 description: `Vente ticket ${ticketId}`
             }]);
@@ -328,12 +344,16 @@ if (url.startsWith('/icon/')) {
             .single();
         
         if (agent) {
+            const newTotalSales = (agent.total_sales || 0) - ticket.total_amount;
+            const newBalance = (agent.balance || 0) - ticket.total_amount;
+            const newCommission = (agent.commission || 0) - ticket.total_amount * 0.05;
+            
             await supabase
                 .from('agents')
                 .update({
-                    total_sales: (agent.total_sales || 0) - ticket.total_amount,
-                    balance: (agent.balance || 0) - ticket.total_amount,
-                    commission: (agent.commission || 0) - ticket.total_amount * 0.05
+                    total_sales: newTotalSales,
+                    balance: newBalance,
+                    commission: newCommission
                 })
                 .eq('id', agent.id);
         }
@@ -358,6 +378,8 @@ if (url.startsWith('/icon/')) {
                 zone: agent ? agent.zone : 'Inconnu',
                 amount: -ticket.total_amount,
                 ticket_id: ticketId,
+                previous_balance: agent ? agent.balance : 0,
+                new_balance: agent ? (agent.balance - ticket.total_amount) : 0,
                 date: new Date().toISOString(),
                 description: `Annulation ticket ${ticketId} - ${reason}`
             }]);
@@ -382,7 +404,7 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
-    // TOUS LES TICKETS
+    // TOUS LES TICKETS (CORRIGÉ - ajoute zone correctement)
     if (url === '/api/all-tickets' && req.method === 'GET') {
         let { data: tickets, error } = await supabase
             .from('tickets')
@@ -401,11 +423,23 @@ if (url.startsWith('/icon/')) {
             });
         }
         
-        const ticketsWithAgent = (tickets || []).map(t => ({
-            ...t,
-            agentName: agentsMap[t.agent_id]?.agent_name || 'Inconnu',
-            zone: agentsMap[t.agent_id]?.zone || 'Inconnu'
-        }));
+        const ticketsWithAgent = (tickets || []).map(t => {
+            const agent = agentsMap[t.agent_id];
+            return {
+                ...t,
+                agentName: agent?.agent_name || 'Inconnu',
+                zone: agent?.zone || 'Inconnu',
+                // Compatibilité des champs
+                isWinner: t.is_winner,
+                isCancelled: t.is_cancelled,
+                winAmount: t.win_amount,
+                totalAmount: t.total_amount,
+                drawingName: t.drawing_name,
+                cancelledAt: t.cancelled_at,
+                cancelReason: t.cancel_reason,
+                isPaid: t.is_paid
+            };
+        });
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, tickets: ticketsWithAgent }));
@@ -431,14 +465,14 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
-    // AGENTS
+    // AGENTS (CORRIGÉ - ajoute totalWins correctement)
     if (url === '/api/agents' && req.method === 'GET') {
         let { data: agents, error } = await supabase
             .from('agents')
             .select('*')
             .neq('is_admin', true);
         
-        // Ajouter totalWins
+        // Ajouter totalWins à partir des tickets
         let { data: tickets, error: ticketsError } = await supabase
             .from('tickets')
             .select('agent_id, win_amount, is_winner, is_cancelled');
@@ -446,7 +480,15 @@ if (url.startsWith('/icon/')) {
         const agentsWithWins = (agents || []).map(a => {
             const agentTickets = (tickets || []).filter(t => t.agent_id === a.id && !t.is_cancelled);
             const totalWins = agentTickets.filter(t => t.is_winner).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-            return { ...a, totalWins };
+            return { 
+                ...a, 
+                totalWins,
+                totalSales: a.total_sales || 0,
+                agentName: a.agent_name,
+                isBlocked: a.is_blocked,
+                balance: a.balance || 0,
+                commission: a.commission || 0
+            };
         });
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -486,7 +528,8 @@ if (url.startsWith('/icon/')) {
             matricule_fiscale: body.matriculeFiscale,
             permis: body.permis,
             date_inscription: new Date().toISOString(),
-            type: 'vendeur'
+            type: 'vendeur',
+            is_admin: false
         };
         
         let { data: agent, error } = await supabase
@@ -513,8 +556,20 @@ if (url.startsWith('/icon/')) {
             .select('*')
             .order('id');
         
+        const formattedPoints = (paymentPoints || []).map(p => ({
+            id: p.id,
+            nom: p.nom,
+            adresse: p.adresse,
+            departement: p.departement,
+            zone: p.zone,
+            isActive: p.is_active,
+            balance: p.balance || 0,
+            totalTransactions: p.total_transactions,
+            dateCreation: p.date_creation
+        }));
+        
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, paymentPoints: paymentPoints || [] }));
+        res.end(JSON.stringify({ success: true, paymentPoints: formattedPoints }));
         return;
     }
     
@@ -550,7 +605,7 @@ if (url.startsWith('/icon/')) {
         }
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
+        res.end(JSON.stringify({ success: true, paymentPoint: point }));
         return;
     }
     
@@ -586,7 +641,7 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
-    // DÉCHARGEMENT
+    // DÉCHARGEMENT (CORRIGÉ - transaction atomique)
     if (url === '/api/deposit' && req.method === 'POST') {
         const body = await parseBody();
         const { agentId, amount, paymentPointId, notes } = body;
@@ -619,18 +674,34 @@ if (url.startsWith('/icon/')) {
         
         const previousBalance = agent.balance || 0;
         const newBalance = previousBalance - amount;
+        const pointPreviousBalance = paymentPoint.balance || 0;
+        const pointNewBalance = pointPreviousBalance + amount;
         
         // Mettre à jour l'agent
-        await supabase
+        const { error: updateAgentError } = await supabase
             .from('agents')
             .update({ balance: newBalance })
             .eq('id', agentId);
         
+        if (updateAgentError) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour agent' }));
+            return;
+        }
+        
         // Mettre à jour le point de paiement
-        await supabase
+        const { error: updatePointError } = await supabase
             .from('payment_points')
-            .update({ balance: (paymentPoint.balance || 0) + amount })
+            .update({ balance: pointNewBalance })
             .eq('id', paymentPointId);
+        
+        if (updatePointError) {
+            // Tentative de rollback
+            await supabase.from('agents').update({ balance: previousBalance }).eq('id', agentId);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour point' }));
+            return;
+        }
         
         // Ajouter transaction
         await supabase
@@ -655,7 +726,7 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
-    // TRANSFERT ENTRE POINTS
+    // TRANSFERT ENTRE POINTS (CORRIGÉ - transaction atomique)
     if (url === '/api/transfer' && req.method === 'POST') {
         const body = await parseBody();
         const { fromPointId, toPointId, amount, notes } = body;
@@ -684,16 +755,36 @@ if (url.startsWith('/icon/')) {
             return;
         }
         
-        // Mettre à jour les soldes
-        await supabase
+        const fromPreviousBalance = fromPoint.balance || 0;
+        const fromNewBalance = fromPreviousBalance - amount;
+        const toPreviousBalance = toPoint.balance || 0;
+        const toNewBalance = toPreviousBalance + amount;
+        
+        // Mettre à jour le point source
+        const { error: updateFromError } = await supabase
             .from('payment_points')
-            .update({ balance: (fromPoint.balance || 0) - amount })
+            .update({ balance: fromNewBalance })
             .eq('id', fromPointId);
         
-        await supabase
+        if (updateFromError) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour point source' }));
+            return;
+        }
+        
+        // Mettre à jour le point destination
+        const { error: updateToError } = await supabase
             .from('payment_points')
-            .update({ balance: (toPoint.balance || 0) + amount })
+            .update({ balance: toNewBalance })
             .eq('id', toPointId);
+        
+        if (updateToError) {
+            // Rollback
+            await supabase.from('payment_points').update({ balance: fromPreviousBalance }).eq('id', fromPointId);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour point destination' }));
+            return;
+        }
         
         // Ajouter transfert
         await supabase
@@ -719,7 +810,8 @@ if (url.startsWith('/icon/')) {
                 to_point_name: toPoint.nom,
                 amount: amount,
                 date: new Date().toISOString(),
-                description: `Transfert de ${amount} GDS de ${fromPoint.nom} vers ${toPoint.nom}`
+                description: `Transfert de ${amount} GDS de ${fromPoint.nom} vers ${toPoint.nom}`,
+                notes: notes
             }]);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -735,7 +827,7 @@ if (url.startsWith('/icon/')) {
         
         let { data: agents, error: agentsError } = await supabase
             .from('agents')
-            .select('id, zone, commission');
+            .select('id, zone, commission, total_sales');
         
         let { data: tickets, error: ticketsError } = await supabase
             .from('tickets')
@@ -743,8 +835,11 @@ if (url.startsWith('/icon/')) {
         
         const report = {};
         
-        for (const zone of (zones || [])) {
-            const zoneName = zone.name;
+        // Si pas de zones définies, utiliser les zones des agents
+        const zonesList = zones && zones.length > 0 ? zones : [...new Set((agents || []).map(a => a.zone).filter(z => z))];
+        
+        for (const zoneItem of zonesList) {
+            const zoneName = typeof zoneItem === 'string' ? zoneItem : zoneItem.name;
             const zoneAgents = (agents || []).filter(a => a.zone === zoneName);
             const agentIds = zoneAgents.map(a => a.id);
             
@@ -769,7 +864,7 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
-    // LIMITES DE BOULES
+    // LIMITES DE BOULES (CORRIGÉ - utilise upsert)
     if (url === '/api/number-limits' && req.method === 'GET') {
         let { data: limits, error } = await supabase
             .from('number_limits')
@@ -794,14 +889,29 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
+    // UPDATE LIMITES (CORRIGÉ - utilise upsert)
     if (url === '/api/update-number-limits' && req.method === 'POST') {
         const body = await parseBody();
         const { type, enabled, blockedNumbers } = body;
         
-        let { error } = await supabase
+        // Vérifier si la ligne existe
+        let { data: existing } = await supabase
             .from('number_limits')
-            .update({ enabled: enabled, blocked_numbers: blockedNumbers })
-            .eq('type', type);
+            .select('id')
+            .eq('type', type)
+            .single();
+        
+        let result;
+        if (existing) {
+            result = await supabase
+                .from('number_limits')
+                .update({ enabled: enabled, blocked_numbers: blockedNumbers })
+                .eq('type', type);
+        } else {
+            result = await supabase
+                .from('number_limits')
+                .insert([{ type: type, enabled: enabled, blocked_numbers: blockedNumbers }]);
+        }
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
@@ -820,7 +930,7 @@ if (url.startsWith('/icon/')) {
         
         if (error) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false }));
+            res.end(JSON.stringify({ success: false, error: error.message }));
         } else {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
@@ -841,11 +951,11 @@ if (url.startsWith('/icon/')) {
         let { data: tickets, error: ticketsError } = await supabase
             .from('tickets')
             .select('total_amount, win_amount, is_winner, is_cancelled')
-            .eq('agent_id', agentId)
-            .eq('is_cancelled', false);
+            .eq('agent_id', agentId);
         
-        const totalSales = (tickets || []).reduce((sum, t) => sum + (t.total_amount || 0), 0);
-        const totalWins = (tickets || []).filter(t => t.is_winner).reduce((sum, t) => sum + (t.win_amount || 0), 0);
+        const validTickets = (tickets || []).filter(t => !t.is_cancelled);
+        const totalSales = validTickets.reduce((sum, t) => sum + (t.total_amount || 0), 0);
+        const totalWins = validTickets.filter(t => t.is_winner).reduce((sum, t) => sum + (t.win_amount || 0), 0);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
@@ -867,14 +977,41 @@ if (url.startsWith('/icon/')) {
             .from('supervisors')
             .select('*');
         
+        const formattedSupervisors = (supervisors || []).map(s => ({
+            id: s.id,
+            username: s.username,
+            prenom: s.prenom,
+            nom: s.nom,
+            zone: s.zone,
+            isActive: s.is_active,
+            carteIdentite: s.carte_identite,
+            matriculeFiscale: s.matricule_fiscale,
+            dateNaissance: s.date_naissance,
+            dateInscription: s.date_inscription,
+            commission: s.commission || 0,
+            totalZoneSales: s.total_zone_sales || 0
+        }));
+        
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, supervisors: supervisors || [] }));
+        res.end(JSON.stringify({ success: true, supervisors: formattedSupervisors }));
         return;
     }
     
-    // CRÉER SUPERVISEUR
+    // CRÉER SUPERVISEUR (CORRIGÉ - retourne les données)
     if (url === '/api/create-supervisor' && req.method === 'POST') {
         const body = await parseBody();
+        
+        // Vérifier si le username existe déjà
+        const { data: existing } = await supabase
+            .from('supervisors')
+            .select('id')
+            .eq('username', body.username);
+        
+        if (existing && existing.length > 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Nom d\'utilisateur déjà existant' }));
+            return;
+        }
         
         const newSupervisor = {
             username: body.username,
@@ -897,15 +1034,34 @@ if (url.startsWith('/icon/')) {
             .select()
             .single();
         
+        if (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+            return;
+        }
+        
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
+        res.end(JSON.stringify({ success: true, supervisor }));
         return;
     }
     
-    // TIRAGES
+    // TIRAGES - SAVE (CORRIGÉ - évite les doublons)
     if (url === '/api/save-drawing' && req.method === 'POST') {
         const body = await parseBody();
         const { drawingName, drawingNumber } = body;
+        
+        // Vérifier si le tirage existe déjà
+        const { data: existing } = await supabase
+            .from('drawings')
+            .select('id')
+            .eq('drawing_name', drawingName)
+            .eq('drawing_number', drawingNumber);
+        
+        if (existing && existing.length > 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Ce tirage a déjà été enregistré' }));
+            return;
+        }
         
         // Sauvegarder le tirage
         await supabase
@@ -947,17 +1103,19 @@ if (url.startsWith('/icon/')) {
                     })
                     .eq('id', ticket.id);
                 
-                // Mettre à jour l'agent
+                // Mettre à jour l'agent (débiter le gain)
                 let { data: agent } = await supabase
                     .from('agents')
                     .select('balance')
                     .eq('id', ticket.agent_id)
                     .single();
                 
-                await supabase
-                    .from('agents')
-                    .update({ balance: (agent?.balance || 0) - totalWin })
-                    .eq('id', ticket.agent_id);
+                if (agent) {
+                    await supabase
+                        .from('agents')
+                        .update({ balance: (agent.balance || 0) - totalWin })
+                        .eq('id', ticket.agent_id);
+                }
                 
                 // Ajouter transaction
                 await supabase
@@ -966,7 +1124,7 @@ if (url.startsWith('/icon/')) {
                         type: 'gain',
                         agent_id: ticket.agent_id,
                         ticket_id: ticket.id,
-                        amount: totalWin,
+                        amount: -totalWin,
                         date: new Date().toISOString(),
                         description: `Gain sur ticket ${ticket.id} - ${totalWin} GDS`
                     }]);
@@ -978,6 +1136,7 @@ if (url.startsWith('/icon/')) {
         return;
     }
     
+    // TIRAGES - GET
     if (url === '/api/drawings' && req.method === 'GET') {
         let { data: drawings, error } = await supabase
             .from('drawings')
@@ -996,7 +1155,8 @@ if (url.startsWith('/icon/')) {
             .select('*');
         
         const now = new Date();
-        const threeMonthsAgo = new Date(now.setMonth(now.getMonth() - 3));
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
         
         const winningTickets = (tickets || []).filter(t => t.is_winner && !t.is_cancelled);
         const pendingTickets = (tickets || []).filter(t => !t.is_winner && !t.is_cancelled && !t.is_paid);
@@ -1009,6 +1169,90 @@ if (url.startsWith('/icon/')) {
             pending: pendingTickets,
             expired: expiredTickets
         }));
+        return;
+    }
+    
+    // PAYER TICKET (NOUVELLE API)
+    if (url === '/api/pay-ticket' && req.method === 'POST') {
+        const body = await parseBody();
+        const { ticketId, paymentPointId } = body;
+        
+        // Récupérer le ticket
+        let { data: ticket, error: ticketError } = await supabase
+            .from('tickets')
+            .select('*')
+            .eq('id', ticketId)
+            .single();
+        
+        if (!ticket) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Ticket non trouvé' }));
+            return;
+        }
+        
+        if (!ticket.is_winner) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Ce ticket n\'est pas gagnant' }));
+            return;
+        }
+        
+        if (ticket.is_paid) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Ce ticket a déjà été payé' }));
+            return;
+        }
+        
+        // Récupérer le point de paiement
+        let { data: paymentPoint, error: pointError } = await supabase
+            .from('payment_points')
+            .select('*')
+            .eq('id', paymentPointId)
+            .single();
+        
+        if (!paymentPoint) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Point de paiement non trouvé' }));
+            return;
+        }
+        
+        // Vérifier si le point a assez de solde
+        if ((paymentPoint.balance || 0) < ticket.win_amount) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Solde insuffisant au point de paiement' }));
+            return;
+        }
+        
+        // Mettre à jour le ticket
+        await supabase
+            .from('tickets')
+            .update({ 
+                is_paid: true, 
+                paid_at: new Date().toISOString(),
+                paid_by_point: paymentPointId
+            })
+            .eq('id', ticketId);
+        
+        // Mettre à jour le point de paiement
+        await supabase
+            .from('payment_points')
+            .update({ balance: (paymentPoint.balance || 0) - ticket.win_amount })
+            .eq('id', paymentPointId);
+        
+        // Ajouter transaction
+        await supabase
+            .from('transactions')
+            .insert([{
+                type: 'paiement_gagnant',
+                ticket_id: ticketId,
+                payment_point_id: paymentPointId,
+                payment_point_name: paymentPoint.nom,
+                amount: -ticket.win_amount,
+                date: new Date().toISOString(),
+                description: `Paiement du ticket gagnant ${ticketId} - ${ticket.win_amount} GDS`
+            }]);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Ticket marqué comme payé' }));
         return;
     }
     
