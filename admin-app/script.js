@@ -183,7 +183,259 @@ async function loadDashboard() {
         document.getElementById('zoneStats').innerHTML = '<p class="error">Erreur de chargement des données</p>';
     }
 }
+// ========== PETITE CAISSE ==========
 
+let pettyCashBalance = 0;
+
+async function loadPettyCash() {
+    try {
+        // Charger le solde
+        const balanceRes = await fetch(`${API_BASE_URL}/api/petty-cash/balance`);
+        const balanceData = await balanceRes.json();
+        if (balanceData.success) {
+            pettyCashBalance = balanceData.balance;
+            document.getElementById('pettyCashBalance').innerHTML = pettyCashBalance.toLocaleString() + ' GDS';
+            // Changer la couleur selon le solde
+            const balanceCard = document.querySelector('#pettyCashSection .cash-balance');
+            if (balanceCard) {
+                if (pettyCashBalance < 1000) {
+                    balanceCard.style.background = 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)';
+                } else if (pettyCashBalance < 5000) {
+                    balanceCard.style.background = 'linear-gradient(135deg, #ffc107 0%, #e0a800 100%)';
+                } else {
+                    balanceCard.style.background = 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)';
+                }
+            }
+        }
+        
+        // Charger les stats du mois
+        const statsRes = await fetch(`${API_BASE_URL}/api/petty-cash/stats`);
+        const statsData = await statsRes.json();
+        if (statsData.success) {
+            document.getElementById('cashInMonth').innerHTML = statsData.stats.totalTopups.toLocaleString() + ' GDS';
+            document.getElementById('cashOutMonth').innerHTML = statsData.stats.totalExpenses.toLocaleString() + ' GDS';
+            document.getElementById('cashTransfersMonth').innerHTML = statsData.stats.totalTransfers.toLocaleString() + ' GDS';
+        }
+        
+        // Charger l'historique
+        await loadPettyCashTransactions();
+        
+        // Mettre à jour le select des points de paiement pour les transferts
+        await updatePaymentPointsSelectForPettyCash();
+        
+    } catch (error) {
+        console.error('Erreur chargement petite caisse:', error);
+    }
+}
+
+async function loadPettyCashTransactions() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/transactions`);
+        const data = await response.json();
+        
+        if (data.success && data.transactions) {
+            let transactions = data.transactions;
+            const search = document.getElementById('filterPettyCash')?.value.toLowerCase();
+            const type = document.getElementById('filterPettyCashType')?.value;
+            
+            if (search) transactions = transactions.filter(t => t.description?.toLowerCase().includes(search) || t.category?.toLowerCase().includes(search));
+            if (type) transactions = transactions.filter(t => t.type === type);
+            
+            const transactionsHtml = transactions.map(t => {
+                let typeIcon = '';
+                let typeClass = '';
+                if (t.type === 'expense') {
+                    typeIcon = '➖';
+                    typeClass = 'expense';
+                } else if (t.type === 'topup') {
+                    typeIcon = '➕';
+                    typeClass = 'topup';
+                } else {
+                    typeIcon = '🔄';
+                    typeClass = 'transfer';
+                }
+                
+                return `
+                    <div class="petty-cash-item ${typeClass}">
+                        <div class="transaction-header">
+                            <span class="transaction-type">${typeIcon} ${getPettyCashTypeLabel(t.type)}</span>
+                            <span class="transaction-date">${new Date(t.date).toLocaleString()}</span>
+                        </div>
+                        <div class="transaction-details">
+                            <strong>${t.description || t.category}</strong><br>
+                            Montant: ${Math.abs(t.amount).toLocaleString()} GDS<br>
+                            ${t.notes ? `Notes: ${t.notes}<br>` : ''}
+                            ${t.payment_point_name ? `Point: ${t.payment_point_name}<br>` : ''}
+                            <small>Admin: ${t.admin_name} | Solde après: ${(t.balance_after || 0).toLocaleString()} GDS</small>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('pettyCashTransactionsList').innerHTML = transactionsHtml || '<p>Aucune transaction</p>';
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        document.getElementById('pettyCashTransactionsList').innerHTML = '<p class="error">Erreur de chargement</p>';
+    }
+}
+
+function getPettyCashTypeLabel(type) {
+    const labels = {
+        expense: 'Dépense',
+        topup: 'Rechargement',
+        transfer_to_payment_point: 'Transfert vers point'
+    };
+    return labels[type] || type;
+}
+
+async function addExpense() {
+    const amount = parseInt(document.getElementById('expenseAmount').value);
+    const category = document.getElementById('expenseCategory').value;
+    const description = document.getElementById('expenseDescription').value.trim();
+    const notes = document.getElementById('expenseNotes').value;
+    
+    if (!amount || amount <= 0) {
+        showToast('Entrez un montant valide', 'error');
+        return;
+    }
+    
+    if (!description) {
+        showToast('Entrez une description', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/expense`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: amount,
+                category: category,
+                description: description,
+                notes: notes,
+                adminName: currentAdmin?.name || currentAdmin?.username || 'Admin'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ Dépense de ${amount.toLocaleString()} GDS enregistrée`, 'success');
+            document.getElementById('expenseAmount').value = '';
+            document.getElementById('expenseDescription').value = '';
+            document.getElementById('expenseNotes').value = '';
+            loadPettyCash();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function transferToPaymentPoint() {
+    const amount = parseInt(document.getElementById('transferToPointAmount').value);
+    const paymentPointId = parseInt(document.getElementById('transferToPointId').value);
+    const notes = document.getElementById('transferToPointNotes').value;
+    
+    if (!amount || amount <= 0) {
+        showToast('Entrez un montant valide', 'error');
+        return;
+    }
+    
+    if (!paymentPointId) {
+        showToast('Sélectionnez un point de paiement', 'error');
+        return;
+    }
+    
+    if (amount > pettyCashBalance) {
+        showToast(`Solde insuffisant. Solde actuel: ${pettyCashBalance.toLocaleString()} GDS`, 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/transfer-to-payment-point`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: amount,
+                paymentPointId: paymentPointId,
+                notes: notes,
+                adminName: currentAdmin?.name || currentAdmin?.username || 'Admin'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ ${amount.toLocaleString()} GDS transférés au point de paiement`, 'success');
+            document.getElementById('transferToPointAmount').value = '';
+            document.getElementById('transferToPointNotes').value = '';
+            loadPettyCash();
+            loadPaymentPoints();
+            loadTransactions();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function topupPettyCash() {
+    const amount = parseInt(document.getElementById('topupAmount').value);
+    const source = document.getElementById('topupSource').value;
+    const notes = document.getElementById('topupNotes').value;
+    
+    if (!amount || amount <= 0) {
+        showToast('Entrez un montant valide', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/topup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: amount,
+                source: source,
+                notes: notes,
+                adminName: currentAdmin?.name || currentAdmin?.username || 'Admin'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ ${amount.toLocaleString()} GDS ajoutés à la petite caisse`, 'success');
+            document.getElementById('topupAmount').value = '';
+            document.getElementById('topupNotes').value = '';
+            loadPettyCash();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function updatePaymentPointsSelectForPettyCash() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/payment-points`);
+        const data = await response.json();
+        
+        if (data.success && data.paymentPoints) {
+            const activePoints = data.paymentPoints.filter(p => p.isActive);
+            const select = document.getElementById('transferToPointId');
+            if (select) {
+                select.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom} - Solde: ${(p.balance || 0).toLocaleString()} GDS</option>`).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
 // ========== EXPORT PDF ==========
 async function exportToPDF(title, data, columns) {
     // Vérifier que jsPDF est chargé
