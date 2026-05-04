@@ -1255,7 +1255,267 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: true, message: 'Ticket marqué comme payé' }));
         return;
     }
+        // ==================== PETITE CAISSE - NOUVELLES ROUTES ====================
     
+    // GET - Solde de la petite caisse
+    if (url === '/api/petty-cash/balance' && req.method === 'GET') {
+        let { data, error } = await supabase
+            .from('petty_cash')
+            .select('balance')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        
+        let balance = 0;
+        if (data && data.length > 0) {
+            balance = data[0].balance;
+        } else {
+            // Créer un enregistrement initial
+            const { data: newData, error: insertError } = await supabase
+                .from('petty_cash')
+                .insert([{ balance: 0, created_at: new Date().toISOString() }])
+                .select();
+            if (newData && newData.length > 0) balance = newData[0].balance;
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, balance: balance }));
+        return;
+    }
+    
+    // GET - Historique des transactions petite caisse
+    if (url === '/api/petty-cash/transactions' && req.method === 'GET') {
+        let { data: transactions, error } = await supabase
+            .from('petty_cash_transactions')
+            .select('*')
+            .order('date', { ascending: false })
+            .limit(100);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, transactions: transactions || [] }));
+        return;
+    }
+    
+    // POST - Nouvelle dépense
+    if (url === '/api/petty-cash/expense' && req.method === 'POST') {
+        const body = await parseBody();
+        const { amount, category, description, notes, adminName } = body;
+        
+        if (!amount || amount <= 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Montant invalide' }));
+            return;
+        }
+        
+        // Récupérer le solde actuel
+        let { data: currentData } = await supabase
+            .from('petty_cash')
+            .select('balance')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        
+        let currentBalance = currentData && currentData.length > 0 ? currentData[0].balance : 0;
+        let newBalance = currentBalance - amount;
+        
+        if (newBalance < 0 && !body.allowNegative) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Solde insuffisant' }));
+            return;
+        }
+        
+        // Mettre à jour le solde
+        await supabase
+            .from('petty_cash')
+            .insert([{ balance: newBalance, created_at: new Date().toISOString() }]);
+        
+        // Enregistrer la transaction
+        const transaction = {
+            type: 'expense',
+            amount: amount,
+            category: category,
+            description: description,
+            notes: notes,
+            admin_name: adminName || 'Admin',
+            balance_after: newBalance,
+            date: new Date().toISOString()
+        };
+        
+        let { data: transactionData, error: transError } = await supabase
+            .from('petty_cash_transactions')
+            .insert([transaction])
+            .select();
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, newBalance: newBalance, transaction: transaction }));
+        return;
+    }
+    
+    // POST - Alimenter un point de paiement depuis la petite caisse
+    if (url === '/api/petty-cash/transfer-to-payment-point' && req.method === 'POST') {
+        const body = await parseBody();
+        const { amount, paymentPointId, notes, adminName } = body;
+        
+        if (!amount || amount <= 0 || !paymentPointId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Données invalides' }));
+            return;
+        }
+        
+        // Récupérer le solde actuel de la petite caisse
+        let { data: cashData } = await supabase
+            .from('petty_cash')
+            .select('balance')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        
+        let currentBalance = cashData && cashData.length > 0 ? cashData[0].balance : 0;
+        
+        if (currentBalance < amount) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Solde petite caisse insuffisant' }));
+            return;
+        }
+        
+        // Récupérer le point de paiement
+        let { data: paymentPoint } = await supabase
+            .from('payment_points')
+            .select('*')
+            .eq('id', paymentPointId)
+            .single();
+        
+        if (!paymentPoint) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Point de paiement non trouvé' }));
+            return;
+        }
+        
+        const newCashBalance = currentBalance - amount;
+        const newPointBalance = (paymentPoint.balance || 0) + amount;
+        
+        // Mettre à jour petite caisse
+        await supabase
+            .from('petty_cash')
+            .insert([{ balance: newCashBalance, created_at: new Date().toISOString() }]);
+        
+        // Mettre à jour point de paiement
+        await supabase
+            .from('payment_points')
+            .update({ balance: newPointBalance })
+            .eq('id', paymentPointId);
+        
+        // Enregistrer la transaction
+        const transaction = {
+            type: 'transfer_to_payment_point',
+            amount: amount,
+            category: 'transfert',
+            description: `Transfert vers ${paymentPoint.nom}`,
+            notes: notes || `Alimentation du point ${paymentPoint.nom} pour paiement des gains`,
+            admin_name: adminName || 'Admin',
+            payment_point_id: paymentPointId,
+            payment_point_name: paymentPoint.nom,
+            balance_after: newCashBalance,
+            date: new Date().toISOString()
+        };
+        
+        await supabase
+            .from('petty_cash_transactions')
+            .insert([transaction]);
+        
+        // Ajouter une transaction dans le module transactions
+        await supabase
+            .from('transactions')
+            .insert([{
+                type: 'alimentation_point',
+                payment_point_id: paymentPointId,
+                payment_point_name: paymentPoint.nom,
+                amount: amount,
+                date: new Date().toISOString(),
+                description: `Alimentation du point ${paymentPoint.nom} depuis la petite caisse`
+            }]);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, newBalance: newCashBalance }));
+        return;
+    }
+    
+    // POST - Recharger la petite caisse depuis les ventes
+    if (url === '/api/petty-cash/topup' && req.method === 'POST') {
+        const body = await parseBody();
+        const { amount, source, notes, adminName } = body;
+        
+        if (!amount || amount <= 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Montant invalide' }));
+            return;
+        }
+        
+        // Récupérer le solde actuel
+        let { data: currentData } = await supabase
+            .from('petty_cash')
+            .select('balance')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        
+        let currentBalance = currentData && currentData.length > 0 ? currentData[0].balance : 0;
+        let newBalance = currentBalance + amount;
+        
+        // Mettre à jour le solde
+        await supabase
+            .from('petty_cash')
+            .insert([{ balance: newBalance, created_at: new Date().toISOString() }]);
+        
+        // Enregistrer la transaction
+        const transaction = {
+            type: 'topup',
+            amount: amount,
+            category: 'rechargement',
+            description: `Rechargement depuis ${source || 'ventes'}`,
+            notes: notes,
+            admin_name: adminName || 'Admin',
+            balance_after: newBalance,
+            date: new Date().toISOString()
+        };
+        
+        await supabase
+            .from('petty_cash_transactions')
+            .insert([transaction]);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, newBalance: newBalance }));
+        return;
+    }
+    
+    // GET - Stats petite caisse (par mois)
+    if (url === '/api/petty-cash/stats' && req.method === 'GET') {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        
+        let { data: transactions, error } = await supabase
+            .from('petty_cash_transactions')
+            .select('*')
+            .gte('date', startOfMonth);
+        
+        let totalExpenses = 0;
+        let totalTopups = 0;
+        let totalTransfers = 0;
+        
+        (transactions || []).forEach(t => {
+            if (t.type === 'expense') totalExpenses += t.amount;
+            else if (t.type === 'topup') totalTopups += t.amount;
+            else if (t.type === 'transfer_to_payment_point') totalTransfers += t.amount;
+        });
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            success: true, 
+            stats: {
+                totalExpenses,
+                totalTopups,
+                totalTransfers,
+                netChange: totalTopups - totalExpenses - totalTransfers
+            }
+        }));
+        return;
+    }
     // Route par défaut
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ message: "Route non trouvée" }));
