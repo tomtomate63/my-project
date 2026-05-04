@@ -13,6 +13,9 @@
     <title>Borlette Admin - Administration Professionnelle</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- ========== AJOUT : Bibliothèques jsPDF pour l'export PDF ========== -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
     <!-- Bouton menu hamburger pour mobile -->
@@ -90,15 +93,16 @@
                     </div>
                 </div>
                <div class="card">
-    <h3><i class="fas fa-chart-pie"></i> Ventes par zone
-        <button id="exportZoneStatsBtn" class="btn-export">📄 PDF</button>
-    </h3>
-    <div id="zoneStats" class="table-responsive"></div>
-</div>
-<div class="card">
-    <h3><i class="fas fa-clock"></i> Dernières ventes</h3>
-    <div id="recentSales"></div>
-</div>
+                    <h3><i class="fas fa-chart-pie"></i> Ventes par zone
+                        <button id="exportZoneStatsBtn" class="btn-export">📄 PDF</button>
+                    </h3>
+                    <div id="zoneStats" class="table-responsive"></div>
+                </div>
+                <div class="card">
+                    <h3><i class="fas fa-clock"></i> Dernières ventes</h3>
+                    <div id="recentSales"></div>
+                </div>
+            </div>
             
             <!-- ENREGISTREMENT -->
             <div id="enregistrementSection" class="section" style="display: none;">
