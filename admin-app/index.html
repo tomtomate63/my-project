@@ -53,143 +53,13 @@
                 <button class="nav-btn" onclick="showSection('controlePaiement', event)"><i class="fas fa-money-bill-wave"></i> <span>Contrôle paiement</span></button>
                 <button class="nav-btn" onclick="showSection('commissions', event)"><i class="fas fa-percent"></i> <span>Commissions</span></button>
                 <button class="nav-btn" onclick="showSection('tirages', event)"><i class="fas fa-dice"></i> <span>Tirages</span></button>
+                <button class="nav-btn" onclick="showSection('pettyCash', event)">
+                    <i class="fas fa-coins"></i> <span>💰 Petite Caisse</span>
+                </button>
                 <button class="logout-btn" onclick="adminLogout()"><i class="fas fa-sign-out-alt"></i> <span>Déconnexion</span></button>
-                <button class="nav-btn" onclick="showSection('tirages', event)"><i class="fas fa-dice"></i> <span>Tirages</span></button>
-<button class="nav-btn" onclick="showSection('pettyCash', event)">
-    <i class="fas fa-coins"></i> <span>💰 Petite Caisse</span>
-</button>
-<button class="logout-btn" onclick="adminLogout()"><i class="fas fa-sign-out-alt"></i> <span>Déconnexion</span></button>
             </div>
         </div>
-                    <!-- PETITE CAISSE -->
-            <div id="pettyCashSection" class="section" style="display: none;">
-                <!-- Dashboard Petite Caisse -->
-                <div class="petty-cash-dashboard">
-                    <div class="stats-grid">
-                        <div class="stat-card cash-balance">
-                            <i class="fas fa-wallet stat-icon"></i>
-                            <h3>Solde Petite Caisse</h3>
-                            <div class="stat-value" id="pettyCashBalance">0 GDS</div>
-                        </div>
-                        <div class="stat-card cash-in">
-                            <i class="fas fa-arrow-down stat-icon"></i>
-                            <h3>Entrées (mois)</h3>
-                            <div class="stat-value" id="cashInMonth">0 GDS</div>
-                        </div>
-                        <div class="stat-card cash-out">
-                            <i class="fas fa-arrow-up stat-icon"></i>
-                            <h3>Sorties (mois)</h3>
-                            <div class="stat-value" id="cashOutMonth">0 GDS</div>
-                        </div>
-                        <div class="stat-card cash-transfer">
-                            <i class="fas fa-exchange-alt stat-icon"></i>
-                            <h3>Transferts points</h3>
-                            <div class="stat-value" id="cashTransfersMonth">0 GDS</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Formulaire Dépense -->
-                <div class="card">
-                    <h3><i class="fas fa-shopping-cart"></i> ➖ Nouvelle dépense</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Montant (GDS)</label>
-                            <input type="number" id="expenseAmount" placeholder="Montant" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label>Catégorie</label>
-                            <select id="expenseCategory">
-                                <option value="materiel">📦 Matériel / Fournitures</option>
-                                <option value="facture">📄 Factures (Eau, Électricité)</option>
-                                <option value="internet">🌐 Internet / Téléphone</option>
-                                <option value="loyer">🏠 Loyer / Location</option>
-                                <option value="salaire">👥 Salaires / Commissions</option>
-                                <option value="maintenance">🔧 Maintenance / Réparation</option>
-                                <option value="transport">🚗 Transport / Carburant</option>
-                                <option value="autre">📝 Autre</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Description</label>
-                            <input type="text" id="expenseDescription" placeholder="Ex: Achat imprimante, Rouleau tickets...">
-                        </div>
-                        <div class="form-group">
-                            <label>Notes (optionnel)</label>
-                            <input type="text" id="expenseNotes" placeholder="Informations complémentaires">
-                        </div>
-                    </div>
-                    <button class="btn-primary" onclick="addExpense()"><i class="fas fa-minus-circle"></i> Enregistrer la dépense</button>
-                    <div id="expenseResult"></div>
-                </div>
-
-                <!-- Formulaire Transfert vers Point de Paiement -->
-                <div class="card">
-                    <h3><i class="fas fa-university"></i> 🔄 Alimenter un point de paiement</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Montant (GDS)</label>
-                            <input type="number" id="transferToPointAmount" placeholder="Montant" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label>Point de paiement</label>
-                            <select id="transferToPointId"></select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Notes (optionnel)</label>
-                            <input type="text" id="transferToPointNotes" placeholder="Motif du transfert">
-                        </div>
-                    </div>
-                    <button class="btn-primary" onclick="transferToPaymentPoint()"><i class="fas fa-exchange-alt"></i> Transférer au point de paiement</button>
-                    <div id="transferToPointResult"></div>
-                </div>
-
-                <!-- Formulaire Rechargement -->
-                <div class="card">
-                    <h3><i class="fas fa-plus-circle"></i> ➕ Recharger la petite caisse</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Montant (GDS)</label>
-                            <input type="number" id="topupAmount" placeholder="Montant" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label>Source</label>
-                            <select id="topupSource">
-                                <option value="ventes">💰 Ventes du jour</option>
-                                <option value="avance">🏦 Avance / Dépôt admin</option>
-                                <option value="autre">📝 Autre</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Notes (optionnel)</label>
-                            <input type="text" id="topupNotes" placeholder="Informations complémentaires">
-                        </div>
-                    </div>
-                    <button class="btn-primary" onclick="topupPettyCash()"><i class="fas fa-plus-circle"></i> Recharger</button>
-                    <div id="topupResult"></div>
-                </div>
-
-                <!-- Historique des transactions -->
-                <div class="card">
-                    <h3><i class="fas fa-history"></i> 📜 Historique des mouvements</h3>
-                    <div class="filters">
-                        <input type="text" id="filterPettyCash" placeholder="Rechercher...">
-                        <select id="filterPettyCashType">
-                            <option value="">Tous</option>
-                            <option value="expense">Dépenses</option>
-                            <option value="topup">Rechargements</option>
-                            <option value="transfer_to_payment_point">Transferts vers points</option>
-                        </select>
-                    </div>
-                    <div id="pettyCashTransactionsList" class="transactions-list"></div>
-                </div>
-            </div>
+        
         <div class="main-content">
             <div class="header">
                 <h1 id="sectionTitle">Tableau de bord</h1>
@@ -225,7 +95,7 @@
                         <div class="stat-value" id="netProfit">0 GDS</div>
                     </div>
                 </div>
-               <div class="card">
+                <div class="card">
                     <h3><i class="fas fa-chart-pie"></i> Ventes par zone
                         <button id="exportZoneStatsBtn" class="btn-export">📄 PDF</button>
                     </h3>
@@ -620,6 +490,136 @@
                 <div class="card">
                     <h3><i class="fas fa-history"></i> Historique des tirages</h3>
                     <div id="drawingsHistory"></div>
+                </div>
+            </div>
+
+            <!-- PETITE CAISSE -->
+            <div id="pettyCashSection" class="section" style="display: none;">
+                <!-- Dashboard Petite Caisse -->
+                <div class="petty-cash-dashboard">
+                    <div class="stats-grid">
+                        <div class="stat-card cash-balance">
+                            <i class="fas fa-wallet stat-icon"></i>
+                            <h3>Solde Petite Caisse</h3>
+                            <div class="stat-value" id="pettyCashBalance">0 GDS</div>
+                        </div>
+                        <div class="stat-card cash-in">
+                            <i class="fas fa-arrow-down stat-icon"></i>
+                            <h3>Entrées (mois)</h3>
+                            <div class="stat-value" id="cashInMonth">0 GDS</div>
+                        </div>
+                        <div class="stat-card cash-out">
+                            <i class="fas fa-arrow-up stat-icon"></i>
+                            <h3>Sorties (mois)</h3>
+                            <div class="stat-value" id="cashOutMonth">0 GDS</div>
+                        </div>
+                        <div class="stat-card cash-transfer">
+                            <i class="fas fa-exchange-alt stat-icon"></i>
+                            <h3>Transferts points</h3>
+                            <div class="stat-value" id="cashTransfersMonth">0 GDS</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Formulaire Dépense -->
+                <div class="card">
+                    <h3><i class="fas fa-shopping-cart"></i> ➖ Nouvelle dépense</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Montant (GDS)</label>
+                            <input type="number" id="expenseAmount" placeholder="Montant" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Catégorie</label>
+                            <select id="expenseCategory">
+                                <option value="materiel">📦 Matériel / Fournitures</option>
+                                <option value="facture">📄 Factures (Eau, Électricité)</option>
+                                <option value="internet">🌐 Internet / Téléphone</option>
+                                <option value="loyer">🏠 Loyer / Location</option>
+                                <option value="salaire">👥 Salaires / Commissions</option>
+                                <option value="maintenance">🔧 Maintenance / Réparation</option>
+                                <option value="transport">🚗 Transport / Carburant</option>
+                                <option value="autre">📝 Autre</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Description</label>
+                            <input type="text" id="expenseDescription" placeholder="Ex: Achat imprimante, Rouleau tickets...">
+                        </div>
+                        <div class="form-group">
+                            <label>Notes (optionnel)</label>
+                            <input type="text" id="expenseNotes" placeholder="Informations complémentaires">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="addExpense()"><i class="fas fa-minus-circle"></i> Enregistrer la dépense</button>
+                    <div id="expenseResult"></div>
+                </div>
+
+                <!-- Formulaire Transfert vers Point de Paiement -->
+                <div class="card">
+                    <h3><i class="fas fa-university"></i> 🔄 Alimenter un point de paiement</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Montant (GDS)</label>
+                            <input type="number" id="transferToPointAmount" placeholder="Montant" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Point de paiement</label>
+                            <select id="transferToPointId"></select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Notes (optionnel)</label>
+                            <input type="text" id="transferToPointNotes" placeholder="Motif du transfert">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="transferToPaymentPoint()"><i class="fas fa-exchange-alt"></i> Transférer au point de paiement</button>
+                    <div id="transferToPointResult"></div>
+                </div>
+
+                <!-- Formulaire Rechargement -->
+                <div class="card">
+                    <h3><i class="fas fa-plus-circle"></i> ➕ Recharger la petite caisse</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Montant (GDS)</label>
+                            <input type="number" id="topupAmount" placeholder="Montant" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Source</label>
+                            <select id="topupSource">
+                                <option value="ventes">💰 Ventes du jour</option>
+                                <option value="avance">🏦 Avance / Dépôt admin</option>
+                                <option value="autre">📝 Autre</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Notes (optionnel)</label>
+                            <input type="text" id="topupNotes" placeholder="Informations complémentaires">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="topupPettyCash()"><i class="fas fa-plus-circle"></i> Recharger</button>
+                    <div id="topupResult"></div>
+                </div>
+
+                <!-- Historique des transactions -->
+                <div class="card">
+                    <h3><i class="fas fa-history"></i> 📜 Historique des mouvements</h3>
+                    <div class="filters">
+                        <input type="text" id="filterPettyCash" placeholder="Rechercher...">
+                        <select id="filterPettyCashType">
+                            <option value="">Tous</option>
+                            <option value="expense">Dépenses</option>
+                            <option value="topup">Rechargements</option>
+                            <option value="transfer_to_payment_point">Transferts vers points</option>
+                        </select>
+                    </div>
+                    <div id="pettyCashTransactionsList" class="transactions-list"></div>
                 </div>
             </div>
         </div>
