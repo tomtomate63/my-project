@@ -2,6 +2,7 @@
 const API_BASE_URL = window.location.origin;
 
 let currentAdmin = null;
+let pettyCashBalance = 0;
 
 // ========== FONCTIONS DE CONNEXION ==========
 async function adminLogin() {
@@ -90,7 +91,8 @@ function showSection(section, event) {
         tickets: 'Tickets',
         controlePaiement: 'Contrôle paiement',
         commissions: 'Commissions',
-        tirages: 'Gestion des tirages'
+        tirages: 'Gestion des tirages',
+        pettyCash: '💰 Petite Caisse'
     };
     document.getElementById('sectionTitle').textContent = titles[section] || section;
     
@@ -105,6 +107,7 @@ function showSection(section, event) {
     if (section === 'controlePaiement') loadPaymentControl();
     if (section === 'commissions') loadCommissions();
     if (section === 'tirages') loadDrawingsHistory();
+    if (section === 'pettyCash') loadPettyCash();
     
     // Fermer le sidebar sur mobile
     closeSidebarAfterClick();
@@ -121,20 +124,33 @@ async function loadAllData() {
     await loadPaymentControl();
     await loadCommissions();
     await loadDrawingsHistory();
+    await loadPettyCash();
 }
 
 // ========== DASHBOARD ==========
 async function loadDashboard() {
     try {
-        // Charger les stats
-        const statsRes = await fetch(`${API_BASE_URL}/api/stats`);
-        const statsData = await statsRes.json();
+        // Utiliser la nouvelle API dashboard-full si disponible, sinon stats classiques
+        let statsData;
+        try {
+            const fullRes = await fetch(`${API_BASE_URL}/api/dashboard-full`);
+            const fullData = await fullRes.json();
+            if (fullData.success) {
+                statsData = fullData;
+            } else {
+                throw new Error('API non disponible');
+            }
+        } catch (e) {
+            // Fallback vers l'API stats classique
+            const statsRes = await fetch(`${API_BASE_URL}/api/stats`);
+            statsData = await statsRes.json();
+        }
         
         if (statsData.success) {
-            document.getElementById('totalSales').innerHTML = statsData.stats.totalSales.toLocaleString() + ' GDS';
-            document.getElementById('totalWins').innerHTML = statsData.stats.totalWins.toLocaleString() + ' GDS';
-            document.getElementById('totalCommission').innerHTML = statsData.stats.totalCommission.toLocaleString() + ' GDS';
-            document.getElementById('netProfit').innerHTML = statsData.stats.netProfit.toLocaleString() + ' GDS';
+            document.getElementById('totalSales').innerHTML = (statsData.stats.totalSales || 0).toLocaleString() + ' GDS';
+            document.getElementById('totalWins').innerHTML = (statsData.stats.totalWins || 0).toLocaleString() + ' GDS';
+            document.getElementById('totalCommission').innerHTML = (statsData.stats.totalCommission || 0).toLocaleString() + ' GDS';
+            document.getElementById('netProfit').innerHTML = (statsData.stats.netProfit || 0).toLocaleString() + ' GDS';
         }
         
         // Charger les ventes par zone
@@ -183,9 +199,8 @@ async function loadDashboard() {
         document.getElementById('zoneStats').innerHTML = '<p class="error">Erreur de chargement des données</p>';
     }
 }
-// ========== PETITE CAISSE ==========
 
-let pettyCashBalance = 0;
+// ========== PETITE CAISSE ==========
 
 async function loadPettyCash() {
     try {
@@ -194,7 +209,10 @@ async function loadPettyCash() {
         const balanceData = await balanceRes.json();
         if (balanceData.success) {
             pettyCashBalance = balanceData.balance;
-            document.getElementById('pettyCashBalance').innerHTML = pettyCashBalance.toLocaleString() + ' GDS';
+            const balanceElem = document.getElementById('pettyCashBalance');
+            if (balanceElem) {
+                balanceElem.innerHTML = pettyCashBalance.toLocaleString() + ' GDS';
+            }
             // Changer la couleur selon le solde
             const balanceCard = document.querySelector('#pettyCashSection .cash-balance');
             if (balanceCard) {
@@ -212,9 +230,12 @@ async function loadPettyCash() {
         const statsRes = await fetch(`${API_BASE_URL}/api/petty-cash/stats`);
         const statsData = await statsRes.json();
         if (statsData.success) {
-            document.getElementById('cashInMonth').innerHTML = statsData.stats.totalTopups.toLocaleString() + ' GDS';
-            document.getElementById('cashOutMonth').innerHTML = statsData.stats.totalExpenses.toLocaleString() + ' GDS';
-            document.getElementById('cashTransfersMonth').innerHTML = statsData.stats.totalTransfers.toLocaleString() + ' GDS';
+            const cashInElem = document.getElementById('cashInMonth');
+            const cashOutElem = document.getElementById('cashOutMonth');
+            const cashTransfersElem = document.getElementById('cashTransfersMonth');
+            if (cashInElem) cashInElem.innerHTML = (statsData.stats.totalTopups || 0).toLocaleString() + ' GDS';
+            if (cashOutElem) cashOutElem.innerHTML = (statsData.stats.totalExpenses || 0).toLocaleString() + ' GDS';
+            if (cashTransfersElem) cashTransfersElem.innerHTML = (statsData.stats.totalTransfers || 0).toLocaleString() + ' GDS';
         }
         
         // Charger l'historique
@@ -250,9 +271,15 @@ async function loadPettyCashTransactions() {
                 } else if (t.type === 'topup') {
                     typeIcon = '➕';
                     typeClass = 'topup';
-                } else {
+                } else if (t.type === 'transfer_to_payment_point') {
                     typeIcon = '🔄';
                     typeClass = 'transfer';
+                } else if (t.type === 'sync') {
+                    typeIcon = '🔄';
+                    typeClass = 'sync';
+                } else {
+                    typeIcon = '📋';
+                    typeClass = 'other';
                 }
                 
                 return `
@@ -272,11 +299,17 @@ async function loadPettyCashTransactions() {
                 `;
             }).join('');
             
-            document.getElementById('pettyCashTransactionsList').innerHTML = transactionsHtml || '<p>Aucune transaction</p>';
+            const container = document.getElementById('pettyCashTransactionsList');
+            if (container) {
+                container.innerHTML = transactionsHtml || '<p>Aucune transaction</p>';
+            }
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('pettyCashTransactionsList').innerHTML = '<p class="error">Erreur de chargement</p>';
+        const container = document.getElementById('pettyCashTransactionsList');
+        if (container) {
+            container.innerHTML = '<p class="error">Erreur de chargement</p>';
+        }
     }
 }
 
@@ -284,16 +317,17 @@ function getPettyCashTypeLabel(type) {
     const labels = {
         expense: 'Dépense',
         topup: 'Rechargement',
-        transfer_to_payment_point: 'Transfert vers point'
+        transfer_to_payment_point: 'Transfert vers point',
+        sync: 'Synchronisation'
     };
     return labels[type] || type;
 }
 
 async function addExpense() {
-    const amount = parseInt(document.getElementById('expenseAmount').value);
-    const category = document.getElementById('expenseCategory').value;
-    const description = document.getElementById('expenseDescription').value.trim();
-    const notes = document.getElementById('expenseNotes').value;
+    const amount = parseInt(document.getElementById('expenseAmount')?.value);
+    const category = document.getElementById('expenseCategory')?.value;
+    const description = document.getElementById('expenseDescription')?.value.trim();
+    const notes = document.getElementById('expenseNotes')?.value;
     
     if (!amount || amount <= 0) {
         showToast('Entrez un montant valide', 'error');
@@ -326,6 +360,7 @@ async function addExpense() {
             document.getElementById('expenseDescription').value = '';
             document.getElementById('expenseNotes').value = '';
             loadPettyCash();
+            loadDashboard();
         } else {
             showToast(data.message || '❌ Erreur', 'error');
         }
@@ -335,9 +370,9 @@ async function addExpense() {
 }
 
 async function transferToPaymentPoint() {
-    const amount = parseInt(document.getElementById('transferToPointAmount').value);
-    const paymentPointId = parseInt(document.getElementById('transferToPointId').value);
-    const notes = document.getElementById('transferToPointNotes').value;
+    const amount = parseInt(document.getElementById('transferToPointAmount')?.value);
+    const paymentPointId = parseInt(document.getElementById('transferToPointId')?.value);
+    const notes = document.getElementById('transferToPointNotes')?.value;
     
     if (!amount || amount <= 0) {
         showToast('Entrez un montant valide', 'error');
@@ -384,9 +419,9 @@ async function transferToPaymentPoint() {
 }
 
 async function topupPettyCash() {
-    const amount = parseInt(document.getElementById('topupAmount').value);
-    const source = document.getElementById('topupSource').value;
-    const notes = document.getElementById('topupNotes').value;
+    const amount = parseInt(document.getElementById('topupAmount')?.value);
+    const source = document.getElementById('topupSource')?.value;
+    const notes = document.getElementById('topupNotes')?.value;
     
     if (!amount || amount <= 0) {
         showToast('Entrez un montant valide', 'error');
@@ -412,10 +447,35 @@ async function topupPettyCash() {
             document.getElementById('topupAmount').value = '';
             document.getElementById('topupNotes').value = '';
             loadPettyCash();
+            loadDashboard();
         } else {
             showToast(data.message || '❌ Erreur', 'error');
         }
     } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function syncPettyCash() {
+    try {
+        showToast('Synchronisation en cours...', 'info');
+        
+        const response = await fetch(`${API_BASE_URL}/api/sync-petty-cash`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ Petite caisse synchronisée ! Nouveau solde: ${data.netProfit.toLocaleString()} GDS`, 'success');
+            await loadDashboard();
+            await loadPettyCash();
+        } else {
+            showToast(data.message || '❌ Erreur lors de la synchronisation', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -425,20 +485,39 @@ async function updatePaymentPointsSelectForPettyCash() {
         const response = await fetch(`${API_BASE_URL}/api/payment-points`);
         const data = await response.json();
         
+        console.log('Points de paiement chargés:', data);
+        
         if (data.success && data.paymentPoints) {
-            const activePoints = data.paymentPoints.filter(p => p.isActive);
+            const activePoints = data.paymentPoints.filter(p => p.isActive === true);
+            const select = document.getElementById('transferToPointId');
+            
+            if (select) {
+                if (activePoints.length > 0) {
+                    select.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom} - Solde: ${(p.balance || 0).toLocaleString()} GDS</option>`).join('');
+                } else {
+                    select.innerHTML = '<option value="">Aucun point actif - Créez un point dans ENREGISTREMENT</option>';
+                }
+            } else {
+                console.error('Élément transferToPointId non trouvé dans le DOM');
+            }
+        } else {
+            console.error('Erreur chargement points:', data);
             const select = document.getElementById('transferToPointId');
             if (select) {
-                select.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom} - Solde: ${(p.balance || 0).toLocaleString()} GDS</option>`).join('');
+                select.innerHTML = '<option value="">Erreur chargement des points</option>';
             }
         }
     } catch (error) {
-        console.error('Erreur:', error);
+        console.error('Erreur chargement points:', error);
+        const select = document.getElementById('transferToPointId');
+        if (select) {
+            select.innerHTML = '<option value="">Erreur de connexion</option>';
+        }
     }
 }
+
 // ========== EXPORT PDF ==========
 async function exportToPDF(title, data, columns) {
-    // Vérifier que jsPDF est chargé
     if (typeof window.jspdf === 'undefined' && typeof jspdf === 'undefined') {
         console.error('jsPDF non chargé');
         showToast('Bibliothèque PDF non chargée. Veuillez rafraîchir la page.', 'error');
@@ -453,18 +532,15 @@ async function exportToPDF(title, data, columns) {
     
     const doc = new jsPDF();
     
-    // Titre
     doc.setFontSize(18);
     doc.setTextColor(30, 60, 114);
     doc.text(title, 14, 20);
     
-    // Date
     doc.setFontSize(10);
     doc.setTextColor(100, 100, 100);
     const dateStr = new Date().toLocaleString('fr-FR');
     doc.text(`Généré le : ${dateStr}`, 14, 28);
     
-    // Tableau
     if (typeof window.jspdf !== 'undefined' && window.jspdf.autoTable) {
         window.jspdf.autoTable(doc, {
             head: [columns],
@@ -486,7 +562,6 @@ async function exportToPDF(title, data, columns) {
             margin: { left: 14, right: 14 }
         });
     } else {
-        // Fallback simple si autoTable n'est pas disponible
         doc.text("Données à exporter:", 14, 35);
         let y = 45;
         for (const row of data.slice(0, 20)) {
@@ -502,7 +577,6 @@ async function exportToPDF(title, data, columns) {
 function initExportButton() {
     const exportBtn = document.getElementById('exportZoneStatsBtn');
     if (exportBtn) {
-        // Supprimer l'ancien écouteur s'il existe
         const newBtn = exportBtn.cloneNode(true);
         exportBtn.parentNode.replaceChild(newBtn, exportBtn);
         
@@ -530,7 +604,6 @@ function initExportButton() {
 // ========== UTILISATEURS ==========
 async function loadUsers() {
     try {
-        // Charger les agents
         const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
         const agentsData = await agentsRes.json();
         
@@ -557,11 +630,8 @@ async function loadUsers() {
                     </table>
                 </div>
             `;
-        } else {
-            document.getElementById('agentsList').innerHTML = '<p>Erreur chargement des agents</p>';
         }
         
-        // Charger les superviseurs
         const supervisorsRes = await fetch(`${API_BASE_URL}/api/supervisors`);
         const supervisorsData = await supervisorsRes.json();
         
@@ -586,7 +656,6 @@ async function loadUsers() {
         }
     } catch (error) {
         console.error('Erreur chargement utilisateurs:', error);
-        document.getElementById('agentsList').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -606,7 +675,6 @@ async function toggleAgentBlock(agentId, block) {
             showToast('Erreur lors du blocage/déblocage', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -645,7 +713,6 @@ async function loadPaymentPoints() {
         const data = await response.json();
         
         if (data.success && data.paymentPoints) {
-            // Afficher la liste
             const pointsHtml = data.paymentPoints.map(p => `
                 <tr>
                     <td>${p.id}</td>
@@ -668,7 +735,6 @@ async function loadPaymentPoints() {
                 </div>
             `;
             
-            // Mettre à jour les selects
             const activePoints = data.paymentPoints.filter(p => p.isActive);
             const selects = ['depositPointId', 'transferFrom', 'transferTo', 'payPaymentPoint'];
             selects.forEach(id => {
@@ -680,7 +746,6 @@ async function loadPaymentPoints() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('paymentPointsList').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -696,11 +761,11 @@ async function togglePaymentPoint(pointId, isActive) {
         if (data.success) {
             showToast(`Point ${isActive ? 'activé' : 'désactivé'}`, 'success');
             loadPaymentPoints();
+            updatePaymentPointsSelectForPettyCash();
         } else {
             showToast('Erreur', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -736,7 +801,6 @@ async function createAgent() {
         
         if (data.success) {
             showToast('✅ Vendeur créé avec succès !', 'success');
-            // Réinitialiser le formulaire
             document.getElementById('newUsername').value = '';
             document.getElementById('newPassword').value = '1234';
             document.getElementById('newPrenom').value = '';
@@ -751,7 +815,6 @@ async function createAgent() {
             showToast(data.message || '❌ Erreur lors de la création', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -797,7 +860,6 @@ async function createSupervisor() {
             showToast(data.message || '❌ Erreur lors de la création', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -834,11 +896,11 @@ async function createPaymentPoint() {
             document.getElementById('pointZone').value = '';
             document.getElementById('pointBalance').value = '0';
             loadPaymentPoints();
+            updatePaymentPointsSelectForPettyCash();
         } else {
             showToast(data.message || '❌ Erreur lors de la création', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -874,7 +936,6 @@ async function loadLimits() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('limitsSettings').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -894,7 +955,6 @@ async function updateLimit(type, enabled, blockedStr) {
             showToast('Erreur lors de la mise à jour', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -906,7 +966,7 @@ async function loadReports() {
         const zoneData = await zoneRes.json();
         
         if (zoneData.success && zoneData.report) {
-            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th><th>Agents</th></tr></thead><tbody>';
+            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th><th>Agents</th></td></thead><tbody>';
             for (const [zone, data] of Object.entries(zoneData.report)) {
                 zoneHtml += `<tr>
                     <td><strong>${zone}</strong></td>
@@ -919,8 +979,6 @@ async function loadReports() {
             }
             zoneHtml += '</tbody></table></div>';
             document.getElementById('reportsByZone').innerHTML = zoneHtml;
-        } else {
-            document.getElementById('reportsByZone').innerHTML = '<p>Aucune donnée</p>';
         }
         
         const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
@@ -943,7 +1001,6 @@ async function loadReports() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('reportsByZone').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -980,7 +1037,6 @@ async function loadTransactions() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('transactionsList').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -1036,7 +1092,6 @@ async function loadAllTickets() {
             
             document.getElementById('allTicketsList').innerHTML = ticketsHtml || '<p>Aucun ticket</p>';
             
-            // Charger les tickets par statut
             const statusRes = await fetch(`${API_BASE_URL}/api/tickets/by-status`);
             const statusData = await statusRes.json();
             if (statusData.success) {
@@ -1053,7 +1108,6 @@ async function loadAllTickets() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('allTicketsList').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -1082,8 +1136,8 @@ async function payTicket(ticketId) {
 }
 
 async function markTicketAsPaid() {
-    const ticketId = document.getElementById('payTicketId').value.trim();
-    const paymentPointId = document.getElementById('payPaymentPoint').value;
+    const ticketId = document.getElementById('payTicketId')?.value.trim();
+    const paymentPointId = document.getElementById('payPaymentPoint')?.value;
     
     if (!ticketId) {
         showToast('Entrez le numéro du ticket', 'error');
@@ -1091,7 +1145,7 @@ async function markTicketAsPaid() {
     }
     
     await payTicket(ticketId);
-    document.getElementById('payTicketId').value = '';
+    if (document.getElementById('payTicketId')) document.getElementById('payTicketId').value = '';
 }
 
 // ========== CONTRÔLE PAIEMENT ==========
@@ -1123,12 +1177,11 @@ async function loadPaymentControl() {
                     <td>${zoneSales.toLocaleString()} GDS</td>
                 </tr>`;
             });
-            html += '</tbody></table></div>';
+            html += '</tbody><td></div>';
             document.getElementById('paymentControl').innerHTML = html;
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('paymentControl').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -1185,7 +1238,6 @@ async function loadCommissions() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('agentCommissions').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -1207,7 +1259,6 @@ async function loadDrawingsHistory() {
         }
     } catch (error) {
         console.error('Erreur:', error);
-        document.getElementById('drawingsHistory').innerHTML = '<p class="error">Erreur de chargement</p>';
     }
 }
 
@@ -1239,7 +1290,6 @@ async function saveDrawing() {
             showToast(data.message || '❌ Erreur', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -1277,7 +1327,6 @@ async function makeDeposit() {
             showToast(data.message || '❌ Erreur', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -1318,7 +1367,6 @@ async function makeTransfer() {
             showToast(data.message || '❌ Erreur', 'error');
         }
     } catch (error) {
-        console.error('Erreur:', error);
         showToast('Erreur de connexion', 'error');
     }
 }
@@ -1404,6 +1452,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const filterTransactionType = document.getElementById('filterTransactionType');
     if (filterTransaction) filterTransaction.addEventListener('input', loadTransactions);
     if (filterTransactionType) filterTransactionType.addEventListener('change', loadTransactions);
+    
+    const filterPettyCash = document.getElementById('filterPettyCash');
+    const filterPettyCashType = document.getElementById('filterPettyCashType');
+    if (filterPettyCash) filterPettyCash.addEventListener('input', loadPettyCashTransactions);
+    if (filterPettyCashType) filterPettyCashType.addEventListener('change', loadPettyCashTransactions);
     
     // Charger les zones dans le filtre
     const zoneSelect = document.getElementById('filterZone');
