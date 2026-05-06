@@ -14,19 +14,19 @@ if (!deviceId) {
 }
 
 async function verifyPOSPin() {
-    const storedPin = localStorage.getItem('posPin');
-    // Nettoyer le code PIN (enlever les tirets espaces etc.)
-enteredPin = enteredPin.replace(/-/g, '').replace(/\s/g, '');
-localStorage.setItem('posPin', enteredPin);
+    let storedPin = localStorage.getItem('posPin');
     
     // Si pas de PIN stocké, demander à l'utilisateur
     if (!storedPin) {
-        const enteredPin = prompt('🔒 ENTREZ LE CODE PIN DU POS :\n(Contactez l\'administrateur pour obtenir le code)');
+        let enteredPin = prompt('🔒 ENTREZ LE CODE PIN DU POS :\n(Contactez l\'administrateur pour obtenir le code)');
         if (!enteredPin) {
             alert('Code PIN requis pour utiliser ce POS');
             return false;
         }
+        // Nettoyer le code PIN (enlever les tirets, espaces, etc.)
+        enteredPin = enteredPin.replace(/-/g, '').replace(/\s/g, '');
         localStorage.setItem('posPin', enteredPin);
+        storedPin = enteredPin;
     }
     
     try {
@@ -34,7 +34,7 @@ localStorage.setItem('posPin', enteredPin);
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                pinCode: localStorage.getItem('posPin'),
+                pinCode: storedPin,
                 deviceId: deviceId,
                 posName: 'POS-' + deviceId.substring(0, 8)
             })
@@ -45,8 +45,7 @@ localStorage.setItem('posPin', enteredPin);
         if (!data.success) {
             // PIN invalide, effacer et réessayer
             localStorage.removeItem('posPin');
-            alert('❌ CODE PIN INVALIDE. POS BLOQUÉ.\nContactez l\'administrateur.');
-            document.body.innerHTML = '<div style="text-align:center;padding:50px;color:red;background:#fff;min-height:100vh;"><i class="fas fa-lock" style="font-size:48px;"></i><br><br><h2>⚠️ POS NON AUTORISÉ</h2><p>Ce terminal n\'est pas autorisé à utiliser cette application.<br>Contactez l\'administrateur pour obtenir un code PIN valide.</p></div>';
+            alert('❌ CODE PIN INVALIDE. Veuillez réessayer.');
             return false;
         }
         
@@ -58,8 +57,6 @@ localStorage.setItem('posPin', enteredPin);
         return true;
     } catch (error) {
         console.error('Erreur vérification PIN:', error);
-        // En cas d'erreur réseau, on bloque pour sécurité (ou on laisse passer selon votre choix)
-        // Ici on bloque pour plus de sécurité
         alert('❌ Erreur de vérification. Impossible de vérifier le code PIN.\nVérifiez votre connexion internet.');
         return false;
     }
@@ -122,7 +119,7 @@ async function login() {
             body: JSON.stringify({ 
                 username, 
                 password,
-                deviceId: deviceId  // Envoyer l'ID de l'appareil pour traçabilité
+                deviceId: deviceId
             })
         });
         
@@ -558,8 +555,11 @@ function displayTickets(tickets) {
 
 function showTicketTab(tab) {
     currentTicketTab = tab;
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    const btns = document.querySelectorAll('.tab-btn');
+    btns.forEach(btn => btn.classList.remove('active'));
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
     loadTickets();
 }
 
@@ -572,34 +572,6 @@ function logout() {
     document.getElementById('password').value = '';
 }
 
-// Support des touches Entrée
-document.getElementById('inputNumber')?.addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') {
-        addNumber();
-    }
-});
-
-document.getElementById('inputAmount')?.addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') {
-        addNumber();
-    }
-});
-
-// ========== CONNEXION AVEC TOUCHE ENTREE ==========
-document.addEventListener('DOMContentLoaded', function() {
-    const usernameInput = document.getElementById('username');
-    const passwordInput = document.getElementById('password');
-    
-    function handleEnter(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            login();
-        }
-    }
-    
-    if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
-    if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
-});
 // ========== MODE SOMBRE ==========
 function initDarkMode() {
     const darkMode = localStorage.getItem('darkMode');
@@ -623,9 +595,44 @@ function toggleDarkMode() {
     }
 }
 
-// Initialiser au chargement
+// ========== INITIALISATION ==========
 document.addEventListener('DOMContentLoaded', function() {
+    // Mode sombre
     initDarkMode();
     const toggleBtn = document.getElementById('darkModeToggle');
     if (toggleBtn) toggleBtn.addEventListener('click', toggleDarkMode);
+    
+    // Support des touches Entrée pour l'ajout de numéros
+    const inputNumber = document.getElementById('inputNumber');
+    const inputAmount = document.getElementById('inputAmount');
+    
+    if (inputNumber) {
+        inputNumber.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addNumber();
+            }
+        });
+    }
+    
+    if (inputAmount) {
+        inputAmount.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addNumber();
+            }
+        });
+    }
+    
+    // Touche Entrée pour la connexion
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    
+    function handleEnter(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            login();
+        }
+    }
+    
+    if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
+    if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
 });
