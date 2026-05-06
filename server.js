@@ -164,10 +164,55 @@ const server = http.createServer(async (req, res) => {
     // Vérification du code PIN pour sécuriser les POS
     // ================== SÉCURITÉ - VALIDATION CODE PIN ==================
 // Vérification du code PIN pour sécuriser les POS
+// ================== SÉCURITÉ - VALIDATION CODE PIN ==================
+// Vérification du code PIN pour sécuriser les POS
 if (url === '/api/verify-pos-pin' && req.method === 'POST') {
     const body = await parseBody();
-    const { pinCode, deviceId, posName } = body;
+    let { pinCode, deviceId, posName } = body;
+    
+    // 🔧 AJOUT : Nettoyer le code PIN (enlever les tirets et espaces)
+    if (pinCode) {
+        pinCode = pinCode.replace(/-/g, '').replace(/\s/g, '');
+    }
+    
+    console.log('Vérification PIN:', pinCode, 'Device:', deviceId);
+    
+    let { data: validPin, error } = await supabase
+        .from('pos_pins')
+        .select('*')
+        .eq('pin_code', pinCode)
+        .eq('is_active', true)
+        .single();
+    
+    if (validPin) {
+        await supabase
+            .from('authorized_devices')
+            .upsert({ 
+                device_id: deviceId,
+                pos_name: posName || validPin.pos_name,
+                pin_code: pinCode,
+                last_seen: new Date().toISOString(),
+                is_active: true
+            });
         
+        await supabase
+            .from('pos_pins')
+            .update({ last_used: new Date().toISOString(), used_count: (validPin.used_count || 0) + 1 })
+            .eq('id', validPin.id);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            success: true, 
+            message: 'POS autorisé',
+            posName: validPin.pos_name,
+            zone: validPin.zone
+        }));
+    } else {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'Code PIN invalide ou inactif' }));
+    }
+    return;
+
         let { data: validPin, error } = await supabase
             .from('pos_pins')
             .select('*')
