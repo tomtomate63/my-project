@@ -6,6 +6,86 @@ let currentItems = [];
 let currentTicketTab = 'all';
 let agentStats = null;
 
+// ========== GESTION DU CODE PIN ET DE L'APPAREIL ==========
+let deviceId = localStorage.getItem('deviceId');
+if (!deviceId) {
+    deviceId = 'POS-' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+    localStorage.setItem('deviceId', deviceId);
+}
+
+async function verifyPOSPin() {
+    const storedPin = localStorage.getItem('posPin');
+    
+    // Si pas de PIN stocké, demander à l'utilisateur
+    if (!storedPin) {
+        const enteredPin = prompt('🔒 ENTREZ LE CODE PIN DU POS :\n(Contactez l\'administrateur pour obtenir le code)');
+        if (!enteredPin) {
+            alert('Code PIN requis pour utiliser ce POS');
+            return false;
+        }
+        localStorage.setItem('posPin', enteredPin);
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/verify-pos-pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                pinCode: localStorage.getItem('posPin'),
+                deviceId: deviceId,
+                posName: 'POS-' + deviceId.substring(0, 8)
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            // PIN invalide, effacer et réessayer
+            localStorage.removeItem('posPin');
+            alert('❌ CODE PIN INVALIDE. POS BLOQUÉ.\nContactez l\'administrateur.');
+            document.body.innerHTML = '<div style="text-align:center;padding:50px;color:red;background:#fff;min-height:100vh;"><i class="fas fa-lock" style="font-size:48px;"></i><br><br><h2>⚠️ POS NON AUTORISÉ</h2><p>Ce terminal n\'est pas autorisé à utiliser cette application.<br>Contactez l\'administrateur pour obtenir un code PIN valide.</p></div>';
+            return false;
+        }
+        
+        // Stocker le nom du POS pour référence
+        if (data.posName) {
+            localStorage.setItem('posName', data.posName);
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Erreur vérification PIN:', error);
+        // En cas d'erreur réseau, on bloque pour sécurité (ou on laisse passer selon votre choix)
+        // Ici on bloque pour plus de sécurité
+        alert('❌ Erreur de vérification. Impossible de vérifier le code PIN.\nVérifiez votre connexion internet.');
+        return false;
+    }
+}
+
+async function checkDeviceAuthorization() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/check-device`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: deviceId })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.authorized === false) {
+            // L'appareil n'est plus autorisé
+            localStorage.removeItem('posPin');
+            alert('⚠️ Ce POS n\'est plus autorisé. Veuillez contacter l\'administrateur.');
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Erreur vérification appareil:', error);
+        return true; // En cas d'erreur, on laisse passer pour ne pas bloquer
+    }
+}
+
 // Afficher la date actuelle
 function updateDate() {
     const dateElement = document.getElementById('currentDate');
@@ -24,11 +104,23 @@ async function login() {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     
+    // Vérifier d'abord le code PIN
+    const isPinValid = await verifyPOSPin();
+    if (!isPinValid) return;
+    
+    // Vérifier que l'appareil est toujours autorisé
+    const isDeviceAuthorized = await checkDeviceAuthorization();
+    if (!isDeviceAuthorized) return;
+    
     try {
         const response = await fetch(`${API_BASE_URL}/api/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify({ 
+                username, 
+                password,
+                deviceId: deviceId  // Envoyer l'ID de l'appareil pour traçabilité
+            })
         });
         
         const data = await response.json();
@@ -534,4 +626,3 @@ document.addEventListener('DOMContentLoaded', function() {
     const toggleBtn = document.getElementById('darkModeToggle');
     if (toggleBtn) toggleBtn.addEventListener('click', toggleDarkMode);
 });
-
