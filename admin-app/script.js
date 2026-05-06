@@ -1,1677 +1,1541 @@
-// server.js - Version Supabase avec PWA (CORRIGÉ)
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const supabase = require('./supabase-client');
+// admin-app/script.js - Version complète corrigée
+const API_BASE_URL = window.location.origin;
 
-// Fonction pour servir les fichiers statiques
-function serveStaticFile(filePath, res, contentType = 'text/html') {
+let currentAdmin = null;
+let pettyCashBalance = 0;
+
+// ========== FONCTIONS DE CONNEXION ==========
+async function adminLogin() {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    
+    if (!username || !password) {
+        showLoginError('Veuillez entrer vos identifiants');
+        return;
+    }
+    
     try {
-        if (!fs.existsSync(filePath)) {
-            res.writeHead(404);
-            res.end('Fichier non trouvé');
-            return false;
+        const response = await fetch(`${API_BASE_URL}/api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        
+        const data = await response.json();
+        
+        // CORRECTION: Vérifier isAdmin correctement
+       if (data.success) {
+    // Vérifier si c'est un admin
+    const isAdminUser = data.user.isAdmin === true || 
+                        data.user.is_admin === true || 
+                        data.user.username === 'admin' ||
+                        data.user.type === 'admin';
+    
+    if (!isAdminUser) {
+        showLoginError('Accès non autorisé - Compte non administrateur');
+        return;
+    }
+    
+    currentAdmin = data.user;
+    // ... reste du code
+
+            currentAdmin = data.user;
+            document.getElementById('adminInfo').innerHTML = `<i class="fas fa-user-shield"></i> ${currentAdmin.name || currentAdmin.username}`;
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('adminPage').style.display = 'flex';
+            
+            // Charger toutes les données
+            await loadAllData();
+            
+            // Afficher le dashboard par défaut
+            showSection('dashboard', null);
+        } else {
+            showLoginError('Accès non autorisé - Identifiants admin requis');
         }
-        const content = fs.readFileSync(filePath);
-        res.writeHead(200, { 'Content-Type': contentType });
-        res.end(content);
-        return true;
-    } catch (err) {
-        res.writeHead(500);
-        res.end('Erreur serveur');
-        return false;
+    } catch (error) {
+        console.error('Erreur connexion:', error);
+        showLoginError('Erreur de connexion au serveur');
     }
 }
 
-function generateTicketId(prefix = 'TKT') {
-    const date = new Date();
-    return `${prefix}-${date.getFullYear()}${(date.getMonth()+1).toString().padStart(2,'0')}${date.getDate().toString().padStart(2,'0')}-${Math.floor(Math.random()*10000).toString().padStart(4,'0')}`;
+function showLoginError(message) {
+    const errorDiv = document.getElementById('loginError');
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+    setTimeout(() => {
+        errorDiv.style.display = 'none';
+    }, 3000);
 }
 
-function getTicketType(number) {
-    if (number.length === 2) return 'simple';
-    if (number.length === 3) return 'three';
-    if (number.length === 5) return 'five';
-    return 'simple';
+function adminLogout() {
+    currentAdmin = null;
+    document.getElementById('loginPage').style.display = 'flex';
+    document.getElementById('adminPage').style.display = 'none';
+    document.getElementById('username').value = '';
+    document.getElementById('password').value = '';
 }
 
-function getWinningCombinations(drawingNumber) {
-    const str = drawingNumber.toString();
-    const combos = { 
-        threeDigit: str.substring(0, 3), 
-        firstPrize: str.substring(3, 5), 
-        secondPrize: str.substring(5, 7), 
-        thirdPrize: str.substring(7, 9), 
-        fiveDigitCombos: [] 
+// ========== FONCTION SHOW SECTION ==========
+function showSection(section, event) {
+    // Cacher toutes les sections
+    document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+    
+    // Afficher la section demandée
+    const targetSection = document.getElementById(`${section}Section`);
+    if (targetSection) {
+        targetSection.style.display = 'block';
+    }
+    
+    // Mettre à jour le bouton actif
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    if (event && event.target) {
+        const clickedBtn = event.target.closest('.nav-btn');
+        if (clickedBtn) clickedBtn.classList.add('active');
+    }
+    
+    // Mettre à jour le titre
+    const titles = {
+        dashboard: 'Tableau de bord',
+        enregistrement: '📋 ENREGISTREMENT - Nouveaux utilisateurs et points',
+        utilisateurs: 'Gestion des utilisateurs',
+        pointsVente: 'Points de vente',
+        limitesBoules: 'Limites de boules',
+        rapports: '📊 RAPPORTS',
+        transactions: 'Transactions',
+        tickets: 'Tickets',
+        controlePaiement: 'Contrôle paiement',
+        commissions: 'Commissions',
+        tirages: 'Gestion des tirages',
+        pettyCash: '💰 Petite Caisse'
     };
-    if (str.length >= 5) combos.fiveDigitCombos = [str.substring(0, 5), str.substring(1, 6), str.substring(0, 3) + str.substring(5, 7)];
-    return combos;
+    document.getElementById('sectionTitle').textContent = titles[section] || section;
+    
+    // Charger les données spécifiques à la section
+    if (section === 'dashboard') loadDashboard();
+    if (section === 'utilisateurs') loadUsers();
+    if (section === 'pointsVente') loadPaymentPoints();
+    if (section === 'limitesBoules') loadLimits();
+    if (section === 'rapports') loadReports();
+    if (section === 'transactions') loadTransactions();
+    if (section === 'tickets') loadAllTickets();
+    if (section === 'controlePaiement') loadPaymentControl();
+    if (section === 'commissions') loadCommissions();
+    if (section === 'tirages') loadDrawingsHistory();
+    if (section === 'pettyCash') loadPettyCash();
+    
+    // Fermer le sidebar sur mobile
+    closeSidebarAfterClick();
 }
 
-function calculateWin(item, drawingResult) {
-    const combos = getWinningCombinations(drawingResult);
-    if (item.number === combos.threeDigit) return { winAmount: item.amount * 60, winType: "Lotto 3 chiffres" };
-    if (combos.fiveDigitCombos.includes(item.number)) return { winAmount: item.amount * 60, winType: "Lotto 5 chiffres" };
-    if (item.number === combos.firstPrize) return { winAmount: item.amount * 60, winType: "Premier lot" };
-    if (item.number === combos.secondPrize) return { winAmount: item.amount * 20, winType: "Deuxième lot" };
-    if (combos.thirdPrize && item.number === combos.thirdPrize) return { winAmount: item.amount * 10, winType: "Troisième lot" };
-    return { winAmount: 0, winType: null };
+async function loadAllData() {
+    await loadDashboard();
+    await loadUsers();
+    await loadPaymentPoints();
+    await loadLimits();
+    await loadReports();
+    await loadTransactions();
+    await loadAllTickets();
+    await loadPaymentControl();
+    await loadCommissions();
+    await loadDrawingsHistory();
+    await loadPettyCash();
 }
 
-// Vérification admin
-function isAdminRequest(req) {
-    // Vérifier le header d'autorisation ou un token
-    const adminKey = req.headers['x-admin-key'];
-    return adminKey === process.env.ADMIN_SECRET || adminKey === 'admin-secret-key-2024';
-}
-
-const server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key');
-    
-    if (req.method === 'OPTIONS') { 
-        res.writeHead(200); 
-        res.end(); 
-        return; 
-    }
-    
-    const url = req.url;
-    
-    // Servir les fichiers statiques
-    if (url.startsWith('/agent-app/')) {
-        let filePath = path.join(__dirname, 'agent-app', url.replace('/agent-app/', ''));
-        if (filePath.endsWith('/') || !path.extname(filePath)) {
-            filePath = path.join(filePath, 'index.html');
+// ========== DASHBOARD ==========
+async function loadDashboard() {
+    try {
+        // Utiliser la nouvelle API dashboard-full si disponible, sinon stats classiques
+        let statsData;
+        try {
+            const fullRes = await fetch(`${API_BASE_URL}/api/dashboard-full`);
+            const fullData = await fullRes.json();
+            if (fullData.success) {
+                statsData = fullData;
+            } else {
+                throw new Error('API non disponible');
+            }
+        } catch (e) {
+            // Fallback vers l'API stats classique
+            const statsRes = await fetch(`${API_BASE_URL}/api/stats`);
+            statsData = await statsRes.json();
         }
-        const ext = path.extname(filePath);
-        let contentType = 'text/html';
-        if (ext === '.css') contentType = 'text/css';
-        if (ext === '.js') contentType = 'application/javascript';
-        serveStaticFile(filePath, res, contentType);
-        return;
-    }
-    
-    if (url.startsWith('/admin-app/')) {
-        let filePath = path.join(__dirname, 'admin-app', url.replace('/admin-app/', ''));
-        if (filePath.endsWith('/') || !path.extname(filePath)) {
-            filePath = path.join(filePath, 'index.html');
+        
+        if (statsData.success) {
+            document.getElementById('totalSales').innerHTML = (statsData.stats.totalSales || 0).toLocaleString() + ' GDS';
+            document.getElementById('totalWins').innerHTML = (statsData.stats.totalWins || 0).toLocaleString() + ' GDS';
+            document.getElementById('totalCommission').innerHTML = (statsData.stats.totalCommission || 0).toLocaleString() + ' GDS';
+            document.getElementById('netProfit').innerHTML = (statsData.stats.netProfit || 0).toLocaleString() + ' GDS';
         }
-        const ext = path.extname(filePath);
-        let contentType = 'text/html';
-        if (ext === '.css') contentType = 'text/css';
-        if (ext === '.js') contentType = 'application/javascript';
-        serveStaticFile(filePath, res, contentType);
+        
+        // Charger les ventes par zone
+        const zoneRes = await fetch(`${API_BASE_URL}/api/reports/by-zone`);
+        const zoneData = await zoneRes.json();
+        
+        if (zoneData.success && zoneData.report) {
+            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th></tr></thead><tbody>';
+            for (const [zone, data] of Object.entries(zoneData.report)) {
+                zoneHtml += `<tr>
+                    <td><strong>${zone}</strong></td>
+                    <td>${(data.totalSales || 0).toLocaleString()} GDS</td>
+                    <td>${(data.totalWins || 0).toLocaleString()} GDS</td>
+                    <td>${(data.totalCommission || 0).toLocaleString()} GDS</td>
+                    <td>${(data.netProfit || 0).toLocaleString()} GDS</td>
+                </tr>`;
+            }
+            zoneHtml += '</tbody></table></div>';
+            document.getElementById('zoneStats').innerHTML = zoneHtml;
+        } else {
+            document.getElementById('zoneStats').innerHTML = '<p>Aucune donnée disponible</p>';
+        }
+        
+        // Charger les dernières ventes
+        const ticketsRes = await fetch(`${API_BASE_URL}/api/all-tickets`);
+        const ticketsData = await ticketsRes.json();
+        
+        if (ticketsData.success && ticketsData.tickets) {
+            const recent = ticketsData.tickets.slice(-5).reverse();
+            document.getElementById('recentSales').innerHTML = recent.map(t => `
+                <div class="ticket-item ${t.isCancelled ? 'cancelled' : (t.isWinner ? 'winner' : '')}">
+                    <strong>${t.id}</strong><br>
+                    ${t.items ? t.items.map(i => `${i.number} : ${i.amount} GDS`).join(', ') : `${t.number} : ${t.amount} GDS`}<br>
+                    Agent: ${t.agentName} | Zone: ${t.zone}<br>
+                    Date: ${new Date(t.date).toLocaleString()}
+                    ${t.isWinner ? '<br><span class="winner-badge">Gagnant</span>' : ''}
+                    ${t.isCancelled ? '<br><span class="cancelled-badge">Annulé</span>' : ''}
+                </div>
+            `).join('') || '<p>Aucune vente récente</p>';
+        }
+        
+        // Initialiser le bouton d'export PDF
+        initExportButton();
+    } catch (error) {
+        console.error('Erreur chargement dashboard:', error);
+        document.getElementById('zoneStats').innerHTML = '<p class="error">Erreur de chargement des données</p>';
+    }
+}
+
+// ========== PETITE CAISSE ==========
+
+async function loadPettyCash() {
+    try {
+        // Charger le solde
+        const balanceRes = await fetch(`${API_BASE_URL}/api/petty-cash/balance`);
+        const balanceData = await balanceRes.json();
+        if (balanceData.success) {
+            pettyCashBalance = balanceData.balance;
+            const balanceElem = document.getElementById('pettyCashBalance');
+            if (balanceElem) {
+                balanceElem.innerHTML = pettyCashBalance.toLocaleString() + ' GDS';
+            }
+            // Changer la couleur selon le solde
+            const balanceCard = document.querySelector('#pettyCashSection .cash-balance');
+            if (balanceCard) {
+                if (pettyCashBalance < 1000) {
+                    balanceCard.style.background = 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)';
+                } else if (pettyCashBalance < 5000) {
+                    balanceCard.style.background = 'linear-gradient(135deg, #ffc107 0%, #e0a800 100%)';
+                } else {
+                    balanceCard.style.background = 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)';
+                }
+            }
+        }
+        
+        // Charger les stats du mois
+        const statsRes = await fetch(`${API_BASE_URL}/api/petty-cash/stats`);
+        const statsData = await statsRes.json();
+        if (statsData.success) {
+            const cashInElem = document.getElementById('cashInMonth');
+            const cashOutElem = document.getElementById('cashOutMonth');
+            const cashTransfersElem = document.getElementById('cashTransfersMonth');
+            if (cashInElem) cashInElem.innerHTML = (statsData.stats.totalTopups || 0).toLocaleString() + ' GDS';
+            if (cashOutElem) cashOutElem.innerHTML = (statsData.stats.totalExpenses || 0).toLocaleString() + ' GDS';
+            if (cashTransfersElem) cashTransfersElem.innerHTML = (statsData.stats.totalTransfers || 0).toLocaleString() + ' GDS';
+        }
+        
+        // Charger l'historique
+        await loadPettyCashTransactions();
+        
+        // Mettre à jour le select des points de paiement pour les transferts
+        await updatePaymentPointsSelectForPettyCash();
+        
+    } catch (error) {
+        console.error('Erreur chargement petite caisse:', error);
+    }
+}
+
+async function loadPettyCashTransactions() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/transactions`);
+        const data = await response.json();
+        
+        if (data.success && data.transactions) {
+            let transactions = data.transactions;
+            const search = document.getElementById('filterPettyCash')?.value.toLowerCase();
+            const type = document.getElementById('filterPettyCashType')?.value;
+            
+            if (search) transactions = transactions.filter(t => t.description?.toLowerCase().includes(search) || t.category?.toLowerCase().includes(search));
+            if (type) transactions = transactions.filter(t => t.type === type);
+            
+            const transactionsHtml = transactions.map(t => {
+                let typeIcon = '';
+                let typeClass = '';
+                if (t.type === 'expense') {
+                    typeIcon = '➖';
+                    typeClass = 'expense';
+                } else if (t.type === 'topup') {
+                    typeIcon = '➕';
+                    typeClass = 'topup';
+                } else if (t.type === 'transfer_to_payment_point') {
+                    typeIcon = '🔄';
+                    typeClass = 'transfer';
+                } else if (t.type === 'sync') {
+                    typeIcon = '🔄';
+                    typeClass = 'sync';
+                } else {
+                    typeIcon = '📋';
+                    typeClass = 'other';
+                }
+                
+                return `
+                    <div class="petty-cash-item ${typeClass}">
+                        <div class="transaction-header">
+                            <span class="transaction-type">${typeIcon} ${getPettyCashTypeLabel(t.type)}</span>
+                            <span class="transaction-date">${new Date(t.date).toLocaleString()}</span>
+                        </div>
+                        <div class="transaction-details">
+                            <strong>${t.description || t.category}</strong><br>
+                            Montant: ${Math.abs(t.amount).toLocaleString()} GDS<br>
+                            ${t.notes ? `Notes: ${t.notes}<br>` : ''}
+                            ${t.payment_point_name ? `Point: ${t.payment_point_name}<br>` : ''}
+                            <small>Admin: ${t.admin_name} | Solde après: ${(t.balance_after || 0).toLocaleString()} GDS</small>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            const container = document.getElementById('pettyCashTransactionsList');
+            if (container) {
+                container.innerHTML = transactionsHtml || '<p>Aucune transaction</p>';
+            }
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        const container = document.getElementById('pettyCashTransactionsList');
+        if (container) {
+            container.innerHTML = '<p class="error">Erreur de chargement</p>';
+        }
+    }
+}
+
+function getPettyCashTypeLabel(type) {
+    const labels = {
+        expense: 'Dépense',
+        topup: 'Rechargement',
+        transfer_to_payment_point: 'Transfert vers point',
+        sync: 'Synchronisation'
+    };
+    return labels[type] || type;
+}
+
+async function addExpense() {
+    const amount = parseInt(document.getElementById('expenseAmount')?.value);
+    const category = document.getElementById('expenseCategory')?.value;
+    const description = document.getElementById('expenseDescription')?.value.trim();
+    const notes = document.getElementById('expenseNotes')?.value;
+    
+    if (!amount || amount <= 0) {
+        showToast('Entrez un montant valide', 'error');
         return;
     }
     
-    // PWA - Servir manifest.json
-    if (url === '/manifest.json') {
-        let filePath = path.join(__dirname, 'manifest.json');
-        serveStaticFile(filePath, res, 'application/json');
+    if (!description) {
+        showToast('Entrez une description', 'error');
         return;
     }
     
-    // PWA - Servir sw.js
-    if (url === '/sw.js') {
-        let filePath = path.join(__dirname, 'sw.js');
-        serveStaticFile(filePath, res, 'application/javascript');
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/expense`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: amount,
+                category: category,
+                description: description,
+                notes: notes,
+                adminName: currentAdmin?.name || currentAdmin?.username || 'Admin'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ Dépense de ${amount.toLocaleString()} GDS enregistrée`, 'success');
+            document.getElementById('expenseAmount').value = '';
+            document.getElementById('expenseDescription').value = '';
+            document.getElementById('expenseNotes').value = '';
+            loadPettyCash();
+            loadDashboard();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function transferToPaymentPoint() {
+    const amount = parseInt(document.getElementById('transferToPointAmount')?.value);
+    const paymentPointId = parseInt(document.getElementById('transferToPointId')?.value);
+    const notes = document.getElementById('transferToPointNotes')?.value;
+    
+    if (!amount || amount <= 0) {
+        showToast('Entrez un montant valide', 'error');
         return;
     }
     
-    // PWA - Servir les icônes
-    if (url.startsWith('/icon/')) {
-        let filePath = path.join(__dirname, url);
-        const ext = path.extname(filePath);
-        let contentType = 'image/png';
-        if (ext === '.ico') contentType = 'image/x-icon';
-        serveStaticFile(filePath, res, contentType);
+    if (!paymentPointId) {
+        showToast('Sélectionnez un point de paiement', 'error');
         return;
     }
     
-    if (url === '/') {
-        res.writeHead(302, { 'Location': '/agent-app/index.html' });
-        res.end();
+    if (amount > pettyCashBalance) {
+        showToast(`Solde insuffisant. Solde actuel: ${pettyCashBalance.toLocaleString()} GDS`, 'error');
         return;
     }
     
-    // Helper pour parser le body
-    const parseBody = () => {
-        return new Promise((resolve, reject) => {
-            let body = '';
-            req.on('data', chunk => body += chunk);
-            req.on('end', () => {
-                try {
-                    resolve(body ? JSON.parse(body) : {});
-                } catch (e) {
-                    resolve({});
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/transfer-to-payment-point`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: amount,
+                paymentPointId: paymentPointId,
+                notes: notes,
+                adminName: currentAdmin?.name || currentAdmin?.username || 'Admin'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ ${amount.toLocaleString()} GDS transférés au point de paiement`, 'success');
+            document.getElementById('transferToPointAmount').value = '';
+            document.getElementById('transferToPointNotes').value = '';
+            loadPettyCash();
+            loadPaymentPoints();
+            loadTransactions();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function topupPettyCash() {
+    const amount = parseInt(document.getElementById('topupAmount')?.value);
+    const source = document.getElementById('topupSource')?.value;
+    const notes = document.getElementById('topupNotes')?.value;
+    
+    if (!amount || amount <= 0) {
+        showToast('Entrez un montant valide', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/petty-cash/topup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: amount,
+                source: source,
+                notes: notes,
+                adminName: currentAdmin?.name || currentAdmin?.username || 'Admin'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ ${amount.toLocaleString()} GDS ajoutés à la petite caisse`, 'success');
+            document.getElementById('topupAmount').value = '';
+            document.getElementById('topupNotes').value = '';
+            loadPettyCash();
+            loadDashboard();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function syncPettyCash() {
+    try {
+        showToast('Synchronisation en cours...', 'info');
+        
+        const response = await fetch(`${API_BASE_URL}/api/sync-petty-cash`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ Petite caisse synchronisée ! Nouveau solde: ${data.netProfit.toLocaleString()} GDS`, 'success');
+            await loadDashboard();
+            await loadPettyCash();
+        } else {
+            showToast(data.message || '❌ Erreur lors de la synchronisation', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function updatePaymentPointsSelectForPettyCash() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/payment-points`);
+        const data = await response.json();
+        
+        console.log('Points de paiement chargés:', data);
+        
+        if (data.success && data.paymentPoints) {
+            const activePoints = data.paymentPoints.filter(p => p.isActive === true);
+            const select = document.getElementById('transferToPointId');
+            
+            if (select) {
+                if (activePoints.length > 0) {
+                    select.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom} - Solde: ${(p.balance || 0).toLocaleString()} GDS</option>`).join('');
+                } else {
+                    select.innerHTML = '<option value="">Aucun point actif - Créez un point dans ENREGISTREMENT</option>';
+                }
+            } else {
+                console.error('Élément transferToPointId non trouvé dans le DOM');
+            }
+        } else {
+            console.error('Erreur chargement points:', data);
+            const select = document.getElementById('transferToPointId');
+            if (select) {
+                select.innerHTML = '<option value="">Erreur chargement des points</option>';
+            }
+        }
+    } catch (error) {
+        console.error('Erreur chargement points:', error);
+        const select = document.getElementById('transferToPointId');
+        if (select) {
+            select.innerHTML = '<option value="">Erreur de connexion</option>';
+        }
+    }
+}
+
+// ========== EXPORT PDF ==========
+async function exportToPDF(title, data, columns) {
+    if (typeof window.jspdf === 'undefined' && typeof jspdf === 'undefined') {
+        console.error('jsPDF non chargé');
+        showToast('Bibliothèque PDF non chargée. Veuillez rafraîchir la page.', 'error');
+        return;
+    }
+    
+    const { jsPDF } = window.jspdf || jspdf;
+    if (!jsPDF) {
+        showToast('Erreur de chargement de jsPDF', 'error');
+        return;
+    }
+    
+    const doc = new jsPDF();
+    
+    doc.setFontSize(18);
+    doc.setTextColor(30, 60, 114);
+    doc.text(title, 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    const dateStr = new Date().toLocaleString('fr-FR');
+    doc.text(`Généré le : ${dateStr}`, 14, 28);
+    
+    if (typeof window.jspdf !== 'undefined' && window.jspdf.autoTable) {
+        window.jspdf.autoTable(doc, {
+            head: [columns],
+            body: data,
+            startY: 35,
+            theme: 'striped',
+            headStyles: { fillColor: [30, 60, 114], textColor: 255 },
+            styles: { fontSize: 9, cellPadding: 3 },
+            margin: { left: 14, right: 14 }
+        });
+    } else if (typeof autoTable !== 'undefined') {
+        autoTable(doc, {
+            head: [columns],
+            body: data,
+            startY: 35,
+            theme: 'striped',
+            headStyles: { fillColor: [30, 60, 114], textColor: 255 },
+            styles: { fontSize: 9, cellPadding: 3 },
+            margin: { left: 14, right: 14 }
+        });
+    } else {
+        doc.text("Données à exporter:", 14, 35);
+        let y = 45;
+        for (const row of data.slice(0, 20)) {
+            doc.text(row.join(' | '), 14, y);
+            y += 8;
+            if (y > 270) break;
+        }
+    }
+    
+    doc.save(`${title.replace(/[^a-z0-9]/gi, '_')}.pdf`);
+}
+
+function initExportButton() {
+    const exportBtn = document.getElementById('exportZoneStatsBtn');
+    if (exportBtn) {
+        const newBtn = exportBtn.cloneNode(true);
+        exportBtn.parentNode.replaceChild(newBtn, exportBtn);
+        
+        newBtn.addEventListener('click', async function() {
+            const zoneStatsDiv = document.getElementById('zoneStats');
+            const table = zoneStatsDiv.querySelector('table');
+            if (table) {
+                const rows = table.querySelectorAll('tr');
+                if (rows.length > 1) {
+                    const headers = Array.from(rows[0].querySelectorAll('th')).map(th => th.innerText);
+                    const data = Array.from(rows).slice(1).map(row => 
+                        Array.from(row.querySelectorAll('td')).map(cell => cell.innerText)
+                    );
+                    await exportToPDF('Ventes_par_zone', data, headers);
+                } else {
+                    showToast('Aucune donnée à exporter', 'error');
+                }
+            } else {
+                showToast('Aucune donnée à exporter', 'error');
+            }
+        });
+    }
+}
+
+// ========== UTILISATEURS ==========
+async function loadUsers() {
+    try {
+        const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+        const agentsData = await agentsRes.json();
+        
+        if (agentsData.success && agentsData.agents) {
+            const agentsHtml = agentsData.agents.map(a => `
+                <tr>
+                    <td>${a.id}</td>
+                    <td><strong>${a.agentName || a.name || a.username}</strong><br><small>${a.username}</small></td>
+                    <td>${a.zone || '-'}</td>
+                    <td>${(a.totalSales || 0).toLocaleString()} GDS</td>
+                    <td>${(a.totalWins || 0).toLocaleString()} GDS</td>
+                    <td class="commission-value">${(a.commission || 0).toLocaleString()} GDS</td>
+                    <td>${(a.balance || 0).toLocaleString()} GDS</td>
+                    <td><span class="${a.isBlocked ? 'agent-blocked' : 'agent-active'}">${a.isBlocked ? 'Bloqué' : 'Actif'}</span></td>
+                    <td><button class="${a.isBlocked ? 'unblock-btn' : 'block-btn'}" onclick="toggleAgentBlock(${a.id}, ${!a.isBlocked})">${a.isBlocked ? 'Débloquer' : 'Bloquer'}</button></td>
+                </tr>
+            `).join('');
+            
+            document.getElementById('agentsList').innerHTML = `
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead><tr><th>ID</th><th>Agent</th><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commission</th><th>Solde</th><th>Statut</th><th>Action</th></tr></thead>
+                        <tbody>${agentsHtml || '<tr><td colspan="9">Aucun agent</td></tr>'}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+        
+        const supervisorsRes = await fetch(`${API_BASE_URL}/api/supervisors`);
+        const supervisorsData = await supervisorsRes.json();
+        
+        if (supervisorsData.success && supervisorsData.supervisors) {
+            const supervisorsHtml = supervisorsData.supervisors.map(s => `
+                <tr>
+                    <td>${s.id}</td>
+                    <td><strong>${s.prenom} ${s.nom}</strong><br><small>${s.username}</small></td>
+                    <td>${s.zone || '-'}</td>
+                    <td><span class="${s.isActive ? 'agent-active' : 'agent-blocked'}">${s.isActive ? 'Actif' : 'Inactif'}</span></td>
+                </tr>
+            `).join('');
+            
+            document.getElementById('supervisorsList').innerHTML = `
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead><tr><th>ID</th><th>Superviseur</th><th>Zone</th><th>Statut</th></tr></thead>
+                        <tbody>${supervisorsHtml || '<tr><td colspan="4">Aucun superviseur</td></tr>'}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Erreur chargement utilisateurs:', error);
+    }
+}
+
+async function toggleAgentBlock(agentId, block) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/toggle-agent-block`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId, block })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Agent ${block ? 'bloqué' : 'débloqué'} avec succès`, 'success');
+            loadUsers();
+        } else {
+            showToast('Erreur lors du blocage/déblocage', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function toggleAgentBlockById() {
+    const identifier = document.getElementById('blockAgentId').value.trim();
+    const action = document.getElementById('blockAction').value;
+    const block = action === 'block';
+    
+    if (!identifier) {
+        showToast('Entrez l\'identifiant de l\'agent', 'error');
+        return;
+    }
+    
+    try {
+        const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+        const agentsData = await agentsRes.json();
+        const agent = agentsData.agents.find(a => a.id == identifier || a.username === identifier);
+        
+        if (!agent) {
+            showToast('Agent non trouvé', 'error');
+            return;
+        }
+        
+        await toggleAgentBlock(agent.id, block);
+        document.getElementById('blockAgentId').value = '';
+    } catch (error) {
+        showToast('Erreur', 'error');
+    }
+}
+
+// ========== POINTS DE VENTE ==========
+async function loadPaymentPoints() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/payment-points`);
+        const data = await response.json();
+        
+        if (data.success && data.paymentPoints) {
+            const pointsHtml = data.paymentPoints.map(p => `
+                <tr>
+                    <td>${p.id}</td>
+                    <td><strong>${p.nom}</strong></td>
+                    <td>${p.adresse || '-'}</td>
+                    <td>${p.departement || '-'}</td>
+                    <td>${p.zone}</td>
+                    <td>${(p.balance || 0).toLocaleString()} GDS</td>
+                    <td><span class="${p.isActive ? 'agent-active' : 'agent-blocked'}">${p.isActive ? 'Actif' : 'Inactif'}</span></td>
+                    <td><button class="${p.isActive ? 'block-btn' : 'unblock-btn'}" onclick="togglePaymentPoint(${p.id}, ${!p.isActive})">${p.isActive ? 'Désactiver' : 'Activer'}</button></td>
+                </tr>
+            `).join('');
+            
+            document.getElementById('paymentPointsList').innerHTML = `
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead><tr><th>ID</th><th>Nom</th><th>Adresse</th><th>Département</th><th>Zone</th><th>Solde</th><th>Statut</th><th>Action</th></tr></thead>
+                        <tbody>${pointsHtml || '<tr><td colspan="8">Aucun point</td></tr>'}</tbody>
+                    </table>
+                </div>
+            `;
+            
+            const activePoints = data.paymentPoints.filter(p => p.isActive);
+            const selects = ['depositPointId', 'transferFrom', 'transferTo', 'payPaymentPoint'];
+            selects.forEach(id => {
+                const select = document.getElementById(id);
+                if (select) {
+                    select.innerHTML = activePoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
                 }
             });
-            req.on('error', reject);
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+async function togglePaymentPoint(pointId, isActive) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/update-payment-point`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: pointId, isActive })
         });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Point ${isActive ? 'activé' : 'désactivé'}`, 'success');
+            loadPaymentPoints();
+            updatePaymentPointsSelectForPettyCash();
+        } else {
+            showToast('Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== CRÉATION AGENT ==========
+async function createAgent() {
+    const agentData = {
+        username: document.getElementById('newUsername').value.trim(),
+        password: document.getElementById('newPassword').value || '1234',
+        prenom: document.getElementById('newPrenom').value.trim(),
+        nom: document.getElementById('newNom').value.trim(),
+        agentName: document.getElementById('newAgentName').value.trim() || `${document.getElementById('newPrenom').value} ${document.getElementById('newNom').value}`,
+        zone: document.getElementById('newZone').value,
+        dateNaissance: document.getElementById('newDateNaissance').value,
+        carteIdentite: document.getElementById('newCarteIdentite').value.trim(),
+        matriculeFiscale: document.getElementById('newMatriculeFiscale').value.trim(),
+        permis: document.getElementById('newPermis').value.trim()
     };
     
-    // ==================== API ROUTES ====================
-    
-    // Test API
-    if (url === '/api/test' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Serveur OK avec Supabase', timestamp: new Date().toISOString() }));
+    if (!agentData.username || !agentData.prenom || !agentData.nom) {
+        showToast('Remplissez tous les champs obligatoires', 'error');
         return;
     }
     
-    // ==================== SÉCURITÉ - VALIDATION CODE PIN ====================
-    // Vérification du code PIN pour sécuriser les POS
-    if (url === '/api/verify-pos-pin' && req.method === 'POST') {
-        const body = await parseBody();
-        const { pinCode, deviceId, posName } = body;
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/create-agent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(agentData)
+        });
         
-        let { data: validPin, error } = await supabase
-            .from('pos_pins')
-            .select('*')
-            .eq('pin_code', pinCode)
-            .eq('is_active', true)
-            .single();
+        const data = await response.json();
         
-        if (validPin) {
-            await supabase
-                .from('authorized_devices')
-                .upsert({ 
-                    device_id: deviceId,
-                    pos_name: posName || validPin.pos_name,
-                    pin_code: pinCode,
-                    last_seen: new Date().toISOString(),
-                    is_active: true
-                });
-            
-            await supabase
-                .from('pos_pins')
-                .update({ last_used: new Date().toISOString(), used_count: (validPin.used_count || 0) + 1 })
-                .eq('id', validPin.id);
-            
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-                success: true, 
-                message: 'POS autorisé',
-                posName: validPin.pos_name,
-                zone: validPin.zone
-            }));
+        if (data.success) {
+            showToast('✅ Vendeur créé avec succès !', 'success');
+            document.getElementById('newUsername').value = '';
+            document.getElementById('newPassword').value = '1234';
+            document.getElementById('newPrenom').value = '';
+            document.getElementById('newNom').value = '';
+            document.getElementById('newAgentName').value = '';
+            document.getElementById('newDateNaissance').value = '';
+            document.getElementById('newCarteIdentite').value = '';
+            document.getElementById('newMatriculeFiscale').value = '';
+            document.getElementById('newPermis').value = '';
+            loadUsers();
         } else {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Code PIN invalide ou inactif' }));
+            showToast(data.message || '❌ Erreur lors de la création', 'error');
         }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== CRÉATION SUPERVISEUR ==========
+async function createSupervisor() {
+    const supervisorData = {
+        username: document.getElementById('superUsername').value.trim(),
+        password: document.getElementById('superPassword').value,
+        prenom: document.getElementById('superPrenom').value.trim(),
+        nom: document.getElementById('superNom').value.trim(),
+        zone: document.getElementById('superZone').value,
+        carteIdentite: document.getElementById('superCarteIdentite').value.trim(),
+        matriculeFiscale: document.getElementById('superMatriculeFiscale').value.trim(),
+        dateNaissance: document.getElementById('superDateNaissance').value
+    };
+    
+    if (!supervisorData.username || !supervisorData.prenom || !supervisorData.nom) {
+        showToast('Remplissez tous les champs obligatoires', 'error');
         return;
     }
     
-    // Vérifier si un appareil est autorisé
-    if (url === '/api/check-device' && req.method === 'POST') {
-        const body = await parseBody();
-        const { deviceId } = body;
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/create-supervisor`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(supervisorData)
+        });
         
-        let { data: device, error } = await supabase
-            .from('authorized_devices')
-            .select('*')
-            .eq('device_id', deviceId)
-            .eq('is_active', true)
-            .single();
+        const data = await response.json();
         
-        if (device) {
-            await supabase
-                .from('authorized_devices')
-                .update({ last_seen: new Date().toISOString() })
-                .eq('device_id', deviceId);
-            
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, authorized: true, posName: device.pos_name }));
+        if (data.success) {
+            showToast('✅ Superviseur créé avec succès !', 'success');
+            document.getElementById('superUsername').value = '';
+            document.getElementById('superPassword').value = 'super123';
+            document.getElementById('superPrenom').value = '';
+            document.getElementById('superNom').value = '';
+            document.getElementById('superCarteIdentite').value = '';
+            document.getElementById('superMatriculeFiscale').value = '';
+            document.getElementById('superDateNaissance').value = '';
+            loadUsers();
         } else {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, authorized: false }));
+            showToast(data.message || '❌ Erreur lors de la création', 'error');
         }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== CRÉATION POINT DE PAIEMENT ==========
+async function createPaymentPoint() {
+    const pointData = {
+        nom: document.getElementById('pointNom').value.trim(),
+        adresse: document.getElementById('pointAdresse').value.trim(),
+        departement: document.getElementById('pointDepartement').value.trim(),
+        zone: document.getElementById('pointZone').value.trim(),
+        balance: parseInt(document.getElementById('pointBalance').value) || 0
+    };
+    
+    if (!pointData.nom) {
+        showToast('Entrez le nom du point de paiement', 'error');
         return;
     }
     
-    // LOGIN (CORRIGÉ - gère correctement les admins)
-    if (url === '/api/login' && req.method === 'POST') {
-        const body = await parseBody();
-        const { username, password } = body;
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/create-payment-point`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pointData)
+        });
         
-        // Chercher dans agents
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('*')
-            .eq('username', username)
-            .eq('password', password);
+        const data = await response.json();
         
-        let user = agents && agents.length > 0 ? agents[0] : null;
-        let isSupervisor = false;
+        if (data.success) {
+            showToast('✅ Point de paiement créé avec succès !', 'success');
+            document.getElementById('pointNom').value = '';
+            document.getElementById('pointAdresse').value = '';
+            document.getElementById('pointDepartement').value = '';
+            document.getElementById('pointZone').value = '';
+            document.getElementById('pointBalance').value = '0';
+            loadPaymentPoints();
+            updatePaymentPointsSelectForPettyCash();
+        } else {
+            showToast(data.message || '❌ Erreur lors de la création', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== LIMITES DE BOULES ==========
+async function loadLimits() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/number-limits`);
+        const data = await response.json();
         
-        if (!user) {
-            // Chercher dans superviseurs
-            let { data: supervisors, error: supError } = await supabase
-                .from('supervisors')
-                .select('*')
-                .eq('username', username)
-                .eq('password', password);
-            
-            if (supervisors && supervisors.length > 0) {
-                user = supervisors[0];
-                isSupervisor = true;
+        if (data.success && data.limits) {
+            const limits = data.limits;
+            document.getElementById('limitsSettings').innerHTML = `
+                <div class="limit-card">
+                    <h4>Lottery 2 chiffres (00-99)</h4>
+                    <label><input type="checkbox" id="simpleEnabled" ${limits.simple.enabled ? 'checked' : ''}> Activer les limites</label>
+                    <textarea id="simpleBlocked" rows="3" placeholder="Numéros bloqués séparés par des virgules">${limits.simple.blockedNumbers.join(', ')}</textarea>
+                    <button onclick="updateLimit('simple', document.getElementById('simpleEnabled').checked, document.getElementById('simpleBlocked').value)">Sauvegarder</button>
+                </div>
+                <div class="limit-card">
+                    <h4>Lottery 3 chiffres (000-999)</h4>
+                    <label><input type="checkbox" id="threeEnabled" ${limits.three.enabled ? 'checked' : ''}> Activer les limites</label>
+                    <textarea id="threeBlocked" rows="3" placeholder="Numéros bloqués séparés par des virgules">${limits.three.blockedNumbers.join(', ')}</textarea>
+                    <button onclick="updateLimit('three', document.getElementById('threeEnabled').checked, document.getElementById('threeBlocked').value)">Sauvegarder</button>
+                </div>
+                <div class="limit-card">
+                    <h4>Lottery 5 chiffres (00000-99999)</h4>
+                    <label><input type="checkbox" id="fiveEnabled" ${limits.five.enabled ? 'checked' : ''}> Activer les limites</label>
+                    <textarea id="fiveBlocked" rows="3" placeholder="Numéros bloqués séparés par des virgules">${limits.five.blockedNumbers.join(', ')}</textarea>
+                    <button onclick="updateLimit('five', document.getElementById('fiveEnabled').checked, document.getElementById('fiveBlocked').value)">Sauvegarder</button>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+async function updateLimit(type, enabled, blockedStr) {
+    const blockedNumbers = blockedStr.split(',').map(s => s.trim()).filter(s => s);
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/update-number-limits`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, enabled, blockedNumbers })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            showToast('Limites mises à jour', 'success');
+        } else {
+            showToast('Erreur lors de la mise à jour', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== RAPPORTS ==========
+async function loadReports() {
+    try {
+        const zoneRes = await fetch(`${API_BASE_URL}/api/reports/by-zone`);
+        const zoneData = await zoneRes.json();
+        
+        if (zoneData.success && zoneData.report) {
+            let zoneHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commissions</th><th>Bénéfice</th><th>Agents</th></td></thead><tbody>';
+            for (const [zone, data] of Object.entries(zoneData.report)) {
+                zoneHtml += `<tr>
+                    <td><strong>${zone}</strong></td>
+                    <td>${(data.totalSales || 0).toLocaleString()} GDS</td>
+                    <td>${(data.totalWins || 0).toLocaleString()} GDS</td>
+                    <td>${(data.totalCommission || 0).toLocaleString()} GDS</td>
+                    <td>${(data.netProfit || 0).toLocaleString()} GDS</td>
+                    <td>${data.agentsCount || 0}</td>
+                </tr>`;
             }
+            zoneHtml += '</tbody></table></div>';
+            document.getElementById('reportsByZone').innerHTML = zoneHtml;
         }
         
-        if (user) {
-            // CORRECTION: Déterminer correctement si c'est un admin
-            const isAdmin = user.is_admin === true || user.username === 'admin' || user.type === 'admin';
-            
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-                success: true, 
-                user: { 
-                    id: user.id, 
-                    username: user.username, 
-                    name: user.agent_name || `${user.prenom || ''} ${user.nom || ''}`.trim() || user.name,
-                    agentName: user.agent_name,
-                    zone: user.zone,
-                    isAdmin: isAdmin,
-                    is_admin: user.is_admin,
-                    isSupervisor: isSupervisor,
-                    isBlocked: user.is_blocked || false,
-                    totalSales: user.total_sales || 0,
-                    balance: user.balance || 0,
-                    commission: user.commission || 0,
-                    type: user.type || (isSupervisor ? 'supervisor' : 'vendeur')
-                } 
-            }));
-        } else {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Identifiants incorrects' }));
-        }
-        return;
-    }
-    
-    // VENTE DE TICKET
-    if (url === '/api/sell-multi-ticket' && req.method === 'POST') {
-        const body = await parseBody();
-        const { agentId, items, drawingName, notes } = body;
+        const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+        const agentsData = await agentsRes.json();
         
-        // Vérifier l'agent
-        let { data: agent, error: agentError } = await supabase
-            .from('agents')
-            .select('*')
-            .eq('id', agentId)
-            .single();
-        
-        if (!agent || agent.is_blocked) {
-            res.writeHead(403, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: agent ? 'POS bloqué' : 'Agent non trouvé' }));
-            return;
-        }
-        
-        // Vérifier les limites de boules
-        for (const item of items) {
-            let { data: limits, error: limitsError } = await supabase
-                .from('number_limits')
-                .select('*')
-                .eq('type', item.ticketType)
-                .single();
-            
-            if (limits && limits.enabled && limits.blocked_numbers && limits.blocked_numbers.includes(item.number)) {
-                res.writeHead(403, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, message: `Le numéro ${item.number} est bloqué` }));
-                return;
-            }
-        }
-        
-        const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
-        const ticketId = generateTicketId();
-        
-        const ticketData = {
-            id: ticketId,
-            agent_id: agentId,
-            items: items,
-            total_amount: totalAmount,
-            drawing_name: drawingName,
-            notes: notes,
-            date: new Date().toISOString(),
-            is_winner: false,
-            win_amount: 0,
-            win_items: [],
-            is_cancelled: false,
-            is_paid: false
-        };
-        
-        // Sauvegarder le ticket
-        let { data: ticket, error: ticketError } = await supabase
-            .from('tickets')
-            .insert([ticketData])
-            .select()
-            .single();
-        
-        if (ticketError) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Erreur sauvegarde ticket' }));
-            return;
-        }
-        
-        // Mettre à jour l'agent
-        const newTotalSales = (agent.total_sales || 0) + totalAmount;
-        const newBalance = (agent.balance || 0) + totalAmount;
-        const newCommission = (agent.commission || 0) + totalAmount * 0.05;
-        
-        await supabase
-            .from('agents')
-            .update({
-                total_sales: newTotalSales,
-                balance: newBalance,
-                commission: newCommission
-            })
-            .eq('id', agentId);
-        
-        // Ajouter transaction
-        await supabase
-            .from('transactions')
-            .insert([{
-                type: 'vente',
-                agent_id: agentId,
-                agent_name: agent.agent_name || `${agent.prenom} ${agent.nom}`,
-                zone: agent.zone,
-                amount: totalAmount,
-                ticket_id: ticketId,
-                previous_balance: agent.balance || 0,
-                new_balance: newBalance,
-                date: new Date().toISOString(),
-                description: `Vente ticket ${ticketId}`
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, ticket: { ...ticket, id: ticketId, totalAmount: totalAmount, items: items, drawingName: drawingName, notes: notes, date: new Date().toISOString() } }));
-        return;
-    }
-    
-    // ANNULATION TICKET
-    if (url === '/api/cancel-ticket' && req.method === 'PUT') {
-        const body = await parseBody();
-        const { ticketId, reason } = body;
-        
-        // Récupérer le ticket
-        let { data: ticket, error: ticketError } = await supabase
-            .from('tickets')
-            .select('*')
-            .eq('id', ticketId)
-            .single();
-        
-        if (!ticket || ticket.is_cancelled) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Ticket non trouvé ou déjà annulé' }));
-            return;
-        }
-        
-        // Récupérer l'agent
-        let { data: agent, error: agentError } = await supabase
-            .from('agents')
-            .select('*')
-            .eq('id', ticket.agent_id)
-            .single();
-        
-        if (agent) {
-            const newTotalSales = (agent.total_sales || 0) - ticket.total_amount;
-            const newBalance = (agent.balance || 0) - ticket.total_amount;
-            const newCommission = (agent.commission || 0) - ticket.total_amount * 0.05;
-            
-            await supabase
-                .from('agents')
-                .update({
-                    total_sales: newTotalSales,
-                    balance: newBalance,
-                    commission: newCommission
-                })
-                .eq('id', agent.id);
-        }
-        
-        // Annuler le ticket
-        await supabase
-            .from('tickets')
-            .update({
-                is_cancelled: true,
-                cancelled_at: new Date().toISOString(),
-                cancel_reason: reason || 'Annulation'
-            })
-            .eq('id', ticketId);
-        
-        // Ajouter transaction
-        await supabase
-            .from('transactions')
-            .insert([{
-                type: 'annulation',
-                agent_id: ticket.agent_id,
-                agent_name: agent ? agent.agent_name : 'Inconnu',
-                zone: agent ? agent.zone : 'Inconnu',
-                amount: -ticket.total_amount,
-                ticket_id: ticketId,
-                previous_balance: agent ? agent.balance : 0,
-                new_balance: agent ? (agent.balance - ticket.total_amount) : 0,
-                date: new Date().toISOString(),
-                description: `Annulation ticket ${ticketId} - ${reason}`
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: 'Ticket annulé avec succès' }));
-        return;
-    }
-    
-    // TICKETS PAR AGENT
-    if (url.startsWith('/api/agent-tickets') && req.method === 'GET') {
-        const agentId = parseInt(url.split('=')[1]);
-        
-        let { data: tickets, error } = await supabase
-            .from('tickets')
-            .select('*')
-            .eq('agent_id', agentId)
-            .order('date', { ascending: false });
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, tickets: tickets || [] }));
-        return;
-    }
-    
-    // TOUS LES TICKETS (CORRIGÉ - ajoute zone correctement)
-    if (url === '/api/all-tickets' && req.method === 'GET') {
-        let { data: tickets, error } = await supabase
-            .from('tickets')
-            .select('*')
-            .order('date', { ascending: false });
-        
-        // Ajouter les infos agent
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('id, agent_name, zone');
-        
-        const agentsMap = {};
-        if (agents) {
-            agents.forEach(a => {
-                agentsMap[a.id] = a;
+        if (agentsData.success && agentsData.agents) {
+            let agentHtml = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Agent</th><th>Zone</th><th>Ventes</th><th>Gains</th><th>Commission</th><th>Solde</th></tr></thead><tbody>';
+            agentsData.agents.forEach(a => {
+                agentHtml += `<tr>
+                    <td><strong>${a.agentName || a.name}</strong><br><small>${a.username}</small></td>
+                    <td>${a.zone}</td>
+                    <td>${(a.totalSales || 0).toLocaleString()} GDS</td>
+                    <td>${(a.totalWins || 0).toLocaleString()} GDS</td>
+                    <td>${(a.commission || 0).toLocaleString()} GDS</td>
+                    <td>${(a.balance || 0).toLocaleString()} GDS</td>
+                </tr>`;
             });
+            agentHtml += '</tbody></table></div>';
+            document.getElementById('reportsByAgent').innerHTML = agentHtml;
         }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+// ========== TRANSACTIONS ==========
+async function loadTransactions() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/transactions`);
+        const data = await response.json();
         
-        const ticketsWithAgent = (tickets || []).map(t => {
-            const agent = agentsMap[t.agent_id];
-            return {
-                ...t,
-                agentName: agent?.agent_name || 'Inconnu',
-                zone: agent?.zone || 'Inconnu',
-                // Compatibilité des champs
-                isWinner: t.is_winner,
-                isCancelled: t.is_cancelled,
-                winAmount: t.win_amount,
-                totalAmount: t.total_amount,
-                drawingName: t.drawing_name,
-                cancelledAt: t.cancelled_at,
-                cancelReason: t.cancel_reason,
-                isPaid: t.is_paid
-            };
+        if (data.success && data.transactions) {
+            let transactions = data.transactions;
+            const search = document.getElementById('filterTransaction')?.value.toLowerCase();
+            const type = document.getElementById('filterTransactionType')?.value;
+            
+            if (search) transactions = transactions.filter(t => t.description?.toLowerCase().includes(search));
+            if (type) transactions = transactions.filter(t => t.type === type);
+            
+            const transactionsHtml = transactions.map(t => `
+                <div class="transaction-item ${t.type}">
+                    <div class="transaction-header">
+                        <span class="transaction-type">${getTransactionTypeIcon(t.type)} ${t.type.toUpperCase()}</span>
+                        <span class="transaction-date">${new Date(t.date).toLocaleString()}</span>
+                    </div>
+                    <div class="transaction-details">
+                        ${t.description || `${t.type} de ${t.amount} GDS`}
+                        ${t.amount ? `<br><strong>Montant: ${Math.abs(t.amount).toLocaleString()} GDS</strong>` : ''}
+                        ${t.previous_balance !== undefined ? `<br>Balance antérieure: ${t.previous_balance.toLocaleString()} GDS` : ''}
+                        ${t.new_balance !== undefined ? `<br>Balance actuelle: ${t.new_balance.toLocaleString()} GDS` : ''}
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('transactionsList').innerHTML = transactionsHtml || '<p>Aucune transaction</p>';
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+function getTransactionTypeIcon(type) {
+    const icons = { vente: '💰', dechargement: '💵', transfert: '🔄', gain: '🏆', annulation: '❌', paiement_gagnant: '💸' };
+    return icons[type] || '📋';
+}
+
+// ========== TICKETS ==========
+async function loadAllTickets() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/all-tickets`);
+        const data = await response.json();
+        
+        if (data.success && data.tickets) {
+            let tickets = data.tickets;
+            const search = document.getElementById('searchTicket')?.value.toLowerCase();
+            const zone = document.getElementById('filterZone')?.value;
+            const status = document.getElementById('filterStatus')?.value;
+            
+            if (search) tickets = tickets.filter(t => t.id?.toLowerCase().includes(search));
+            if (zone) tickets = tickets.filter(t => t.zone === zone);
+            if (status === 'winner') tickets = tickets.filter(t => t.isWinner);
+            else if (status === 'cancelled') tickets = tickets.filter(t => t.isCancelled);
+            else if (status === 'active') tickets = tickets.filter(t => !t.isCancelled && !t.isWinner);
+            
+            const ticketsHtml = tickets.map(t => {
+                let statusBadge = '';
+                if (t.isCancelled) statusBadge = '<span class="cancelled-badge">Annulé</span>';
+                else if (t.isWinner) statusBadge = `<span class="winner-badge">Gagnant ${(t.winAmount || 0).toLocaleString()} GDS ${!t.isPaid ? '⚠️ Non payé' : '✅ Payé'}</span>`;
+                else statusBadge = '<span class="pending-badge">En attente</span>';
+                
+                const itemsHtml = t.items ? t.items.map(i => `<div>${i.number} : ${i.amount} GDS</div>`).join('') : `<div>${t.number} : ${t.amount} GDS</div>`;
+                
+                return `
+                    <div class="ticket-item ${t.isCancelled ? 'cancelled' : (t.isWinner ? 'winner' : '')}">
+                        <div class="ticket-header">
+                            <strong>${t.id}</strong>
+                            ${statusBadge}
+                        </div>
+                        <div class="ticket-items">${itemsHtml}</div>
+                        <div class="ticket-footer">
+                            <strong>Total: ${(t.totalAmount || t.amount || 0).toLocaleString()} GDS</strong><br>
+                            Agent: ${t.agentName} | Zone: ${t.zone}<br>
+                            Tirage: ${t.drawingName}<br>
+                            Date: ${new Date(t.date).toLocaleString()}
+                            ${t.isCancelled ? `<br><small>Annulé: ${t.cancelReason} (${new Date(t.cancelledAt).toLocaleString()})</small>` : ''}
+                            ${t.isWinner && !t.isPaid ? `<br><button class="pay-btn" onclick="payTicket('${t.id}')">💰 Payer ce ticket</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('allTicketsList').innerHTML = ticketsHtml || '<p>Aucun ticket</p>';
+            
+            const statusRes = await fetch(`${API_BASE_URL}/api/tickets/by-status`);
+            const statusData = await statusRes.json();
+            if (statusData.success) {
+                document.getElementById('winningTicketsList').innerHTML = statusData.winning.length > 0 ? 
+                    statusData.winning.map(t => `<div class="ticket-item winner">Ticket ${t.id} - ${(t.win_amount || 0).toLocaleString()} GDS</div>`).join('') : 
+                    '<p>Aucun ticket gagnant</p>';
+                document.getElementById('pendingTicketsList').innerHTML = statusData.pending.length > 0 ? 
+                    statusData.pending.map(t => `<div class="ticket-item">Ticket ${t.id} - ${(t.total_amount || 0).toLocaleString()} GDS</div>`).join('') : 
+                    '<p>Aucun ticket en attente</p>';
+                document.getElementById('expiredTicketsList').innerHTML = statusData.expired.length > 0 ? 
+                    statusData.expired.map(t => `<div class="ticket-item cancelled">Ticket ${t.id} - ${(t.total_amount || 0).toLocaleString()} GDS</div>`).join('') : 
+                    '<p>Aucun ticket caduque</p>';
+            }
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+async function payTicket(ticketId) {
+    const paymentPointId = prompt('Entrez l\'ID du point de paiement pour ce paiement:');
+    if (!paymentPointId) return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/pay-ticket`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticketId, paymentPointId: parseInt(paymentPointId) })
         });
         
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, tickets: ticketsWithAgent }));
-        return;
-    }
-    
-    // STATISTIQUES
-    if (url === '/api/stats' && req.method === 'GET') {
-        let { data: tickets, error } = await supabase
-            .from('tickets')
-            .select('total_amount, win_amount, is_cancelled, is_winner');
-        
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('commission');
-        
-        const totalSales = (tickets || []).filter(t => !t.is_cancelled).reduce((sum, t) => sum + (t.total_amount || 0), 0);
-        const totalWins = (tickets || []).filter(t => t.is_winner && !t.is_cancelled).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-        const totalCommission = (agents || []).reduce((sum, a) => sum + (a.commission || 0), 0);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, stats: { totalSales, totalWins, totalCommission, netProfit: totalSales - totalWins - totalCommission } }));
-        return;
-    }
-    
-    // AGENTS (CORRIGÉ - ajoute totalWins correctement)
-    if (url === '/api/agents' && req.method === 'GET') {
-        let { data: agents, error } = await supabase
-            .from('agents')
-            .select('*')
-            .neq('is_admin', true);
-        
-        // Ajouter totalWins à partir des tickets
-        let { data: tickets, error: ticketsError } = await supabase
-            .from('tickets')
-            .select('agent_id, win_amount, is_winner, is_cancelled');
-        
-        const agentsWithWins = (agents || []).map(a => {
-            const agentTickets = (tickets || []).filter(t => t.agent_id === a.id && !t.is_cancelled);
-            const totalWins = agentTickets.filter(t => t.is_winner).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-            return { 
-                ...a, 
-                totalWins,
-                totalSales: a.total_sales || 0,
-                agentName: a.agent_name,
-                isBlocked: a.is_blocked,
-                balance: a.balance || 0,
-                commission: a.commission || 0
-            };
-        });
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, agents: agentsWithWins }));
-        return;
-    }
-    
-    // CRÉER AGENT
-    if (url === '/api/create-agent' && req.method === 'POST') {
-        const body = await parseBody();
-        
-        const { data: existing, error: existingError } = await supabase
-            .from('agents')
-            .select('id')
-            .eq('username', body.username);
-        
-        if (existing && existing.length > 0) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Nom d\'utilisateur déjà existant' }));
-            return;
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Ticket ${ticketId} marqué comme payé`, 'success');
+            loadAllTickets();
+            loadPaymentPoints();
+        } else {
+            showToast(data.message || 'Erreur', 'error');
         }
-        
-        const newAgent = {
-            username: body.username,
-            password: body.password || '1234',
-            prenom: body.prenom,
-            nom: body.nom,
-            agent_name: body.agentName || `${body.prenom} ${body.nom}`,
-            zone: body.zone,
-            is_blocked: false,
-            total_sales: 0,
-            balance: 0,
-            commission: 0,
-            commission_rate: 0.05,
-            date_naissance: body.dateNaissance,
-            carte_identite: body.carteIdentite,
-            matricule_fiscale: body.matriculeFiscale,
-            permis: body.permis,
-            date_inscription: new Date().toISOString(),
-            type: 'vendeur',
-            is_admin: false
-        };
-        
-        let { data: agent, error } = await supabase
-            .from('agents')
-            .insert([newAgent])
-            .select()
-            .single();
-        
-        if (error) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-            return;
-        }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, agent }));
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function markTicketAsPaid() {
+    const ticketId = document.getElementById('payTicketId')?.value.trim();
+    const paymentPointId = document.getElementById('payPaymentPoint')?.value;
+    
+    if (!ticketId) {
+        showToast('Entrez le numéro du ticket', 'error');
         return;
     }
     
-    // ==================== POINTS DE PAIEMENT (CORRIGÉ) ====================
-    // GET - Points de paiement avec solde incluant les ventes de la zone
-    if (url === '/api/payment-points' && req.method === 'GET') {
-        let { data: paymentPoints, error } = await supabase
-            .from('payment_points')
-            .select('*')
-            .order('id');
+    await payTicket(ticketId);
+    if (document.getElementById('payTicketId')) document.getElementById('payTicketId').value = '';
+}
+
+// ========== CONTRÔLE PAIEMENT ==========
+async function loadPaymentControl() {
+    try {
+        const pointsRes = await fetch(`${API_BASE_URL}/api/payment-points`);
+        const pointsData = await pointsRes.json();
         
-        // Calculer les ventes par zone
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('zone, total_sales');
+        const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+        const agentsData = await agentsRes.json();
         
         const salesByZone = {};
-        (agents || []).forEach(a => {
-            if (!salesByZone[a.zone]) salesByZone[a.zone] = 0;
-            salesByZone[a.zone] += (a.total_sales || 0);
-        });
-        
-        const formattedPoints = (paymentPoints || []).map(p => ({
-            id: p.id,
-            nom: p.nom,
-            adresse: p.adresse,
-            departement: p.departement,
-            zone: p.zone,
-            isActive: p.is_active,
-            balance: (salesByZone[p.zone] || 0) + (p.balance || 0),
-            balance_ventes: salesByZone[p.zone] || 0,
-            balance_transferts: p.balance || 0,
-            totalTransactions: p.total_transactions,
-            dateCreation: p.date_creation
-        }));
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, paymentPoints: formattedPoints }));
-        return;
-    }
-    
-    // CRÉER POINT DE PAIEMENT
-    if (url === '/api/create-payment-point' && req.method === 'POST') {
-        const body = await parseBody();
-        
-        const newPoint = {
-            nom: body.nom,
-            adresse: body.adresse,
-            departement: body.departement,
-            zone: body.zone,
-            is_active: true,
-            balance: body.balance || 0,
-            total_transactions: 0,
-            date_creation: new Date().toISOString()
-        };
-        
-        let { data: point, error } = await supabase
-            .from('payment_points')
-            .insert([newPoint])
-            .select()
-            .single();
-        
-        // Ajouter la zone si elle n'existe pas
-        let { data: existingZone } = await supabase
-            .from('zones')
-            .select('name')
-            .eq('name', body.zone);
-        
-        if (!existingZone || existingZone.length === 0) {
-            await supabase.from('zones').insert([{ name: body.zone }]);
-        }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, paymentPoint: point }));
-        return;
-    }
-    
-    // MODIFIER POINT DE PAIEMENT
-    if (url === '/api/update-payment-point' && req.method === 'PUT') {
-        const body = await parseBody();
-        const { id, isActive } = body;
-        
-        let { error } = await supabase
-            .from('payment_points')
-            .update({ is_active: isActive })
-            .eq('id', id);
-        
-        if (error) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Point non trouvé' }));
-        } else {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
-        }
-        return;
-    }
-    
-    // TRANSACTIONS
-    if (url === '/api/transactions' && req.method === 'GET') {
-        let { data: transactions, error } = await supabase
-            .from('transactions')
-            .select('*')
-            .order('date', { ascending: false });
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, transactions: transactions || [] }));
-        return;
-    }
-    
-    // DÉCHARGEMENT (CORRIGÉ - transaction atomique)
-    if (url === '/api/deposit' && req.method === 'POST') {
-        const body = await parseBody();
-        const { agentId, amount, paymentPointId, notes } = body;
-        
-        // Récupérer l'agent
-        let { data: agent, error: agentError } = await supabase
-            .from('agents')
-            .select('*')
-            .eq('id', agentId)
-            .single();
-        
-        // Récupérer le point de paiement
-        let { data: paymentPoint, error: pointError } = await supabase
-            .from('payment_points')
-            .select('*')
-            .eq('id', paymentPointId)
-            .single();
-        
-        if (!agent || !paymentPoint) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Agent ou point de paiement non trouvé' }));
-            return;
-        }
-        
-        if ((agent.balance || 0) < amount) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Solde insuffisant' }));
-            return;
-        }
-        
-        const previousBalance = agent.balance || 0;
-        const newBalance = previousBalance - amount;
-        const pointPreviousBalance = paymentPoint.balance || 0;
-        const pointNewBalance = pointPreviousBalance + amount;
-        
-        // Mettre à jour l'agent
-        const { error: updateAgentError } = await supabase
-            .from('agents')
-            .update({ balance: newBalance })
-            .eq('id', agentId);
-        
-        if (updateAgentError) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour agent' }));
-            return;
-        }
-        
-        // Mettre à jour le point de paiement
-        const { error: updatePointError } = await supabase
-            .from('payment_points')
-            .update({ balance: pointNewBalance })
-            .eq('id', paymentPointId);
-        
-        if (updatePointError) {
-            // Tentative de rollback
-            await supabase.from('agents').update({ balance: previousBalance }).eq('id', agentId);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour point' }));
-            return;
-        }
-        
-        // Ajouter transaction
-        await supabase
-            .from('transactions')
-            .insert([{
-                type: 'dechargement',
-                agent_id: agentId,
-                agent_name: agent.agent_name || `${agent.prenom} ${agent.nom}`,
-                zone: agent.zone,
-                payment_point_id: paymentPointId,
-                payment_point_name: paymentPoint.nom,
-                amount: amount,
-                previous_balance: previousBalance,
-                new_balance: newBalance,
-                date: new Date().toISOString(),
-                description: `Déchargement de ${amount} GDS par ${agent.agent_name} au ${paymentPoint.nom}`,
-                notes: notes
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, newBalance: newBalance }));
-        return;
-    }
-    
-    // TRANSFERT ENTRE POINTS (CORRIGÉ - transaction atomique)
-    if (url === '/api/transfer' && req.method === 'POST') {
-        const body = await parseBody();
-        const { fromPointId, toPointId, amount, notes } = body;
-        
-        let { data: fromPoint, error: fromError } = await supabase
-            .from('payment_points')
-            .select('*')
-            .eq('id', fromPointId)
-            .single();
-        
-        let { data: toPoint, error: toError } = await supabase
-            .from('payment_points')
-            .select('*')
-            .eq('id', toPointId)
-            .single();
-        
-        if (!fromPoint || !toPoint) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Point de paiement non trouvé' }));
-            return;
-        }
-        
-        if ((fromPoint.balance || 0) < amount) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Solde insuffisant' }));
-            return;
-        }
-        
-        const fromPreviousBalance = fromPoint.balance || 0;
-        const fromNewBalance = fromPreviousBalance - amount;
-        const toPreviousBalance = toPoint.balance || 0;
-        const toNewBalance = toPreviousBalance + amount;
-        
-        // Mettre à jour le point source
-        const { error: updateFromError } = await supabase
-            .from('payment_points')
-            .update({ balance: fromNewBalance })
-            .eq('id', fromPointId);
-        
-        if (updateFromError) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour point source' }));
-            return;
-        }
-        
-        // Mettre à jour le point destination
-        const { error: updateToError } = await supabase
-            .from('payment_points')
-            .update({ balance: toNewBalance })
-            .eq('id', toPointId);
-        
-        if (updateToError) {
-            // Rollback
-            await supabase.from('payment_points').update({ balance: fromPreviousBalance }).eq('id', fromPointId);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Erreur mise à jour point destination' }));
-            return;
-        }
-        
-        // Ajouter transfert
-        await supabase
-            .from('transfers')
-            .insert([{
-                from_point_id: fromPointId,
-                from_point_name: fromPoint.nom,
-                to_point_id: toPointId,
-                to_point_name: toPoint.nom,
-                amount: amount,
-                date: new Date().toISOString(),
-                notes: notes
-            }]);
-        
-        // Ajouter transaction
-        await supabase
-            .from('transactions')
-            .insert([{
-                type: 'transfert',
-                from_point_id: fromPointId,
-                from_point_name: fromPoint.nom,
-                to_point_id: toPointId,
-                to_point_name: toPoint.nom,
-                amount: amount,
-                date: new Date().toISOString(),
-                description: `Transfert de ${amount} GDS de ${fromPoint.nom} vers ${toPoint.nom}`,
-                notes: notes
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-        return;
-    }
-    
-    // RAPPORTS PAR ZONE
-    if (url === '/api/reports/by-zone' && req.method === 'GET') {
-        let { data: zones, error: zonesError } = await supabase
-            .from('zones')
-            .select('name');
-        
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('id, zone, commission, total_sales');
-        
-        let { data: tickets, error: ticketsError } = await supabase
-            .from('tickets')
-            .select('agent_id, total_amount, win_amount, is_winner, is_cancelled');
-        
-        const report = {};
-        
-        // Si pas de zones définies, utiliser les zones des agents
-        const zonesList = zones && zones.length > 0 ? zones : [...new Set((agents || []).map(a => a.zone).filter(z => z))];
-        
-        for (const zoneItem of zonesList) {
-            const zoneName = typeof zoneItem === 'string' ? zoneItem : zoneItem.name;
-            const zoneAgents = (agents || []).filter(a => a.zone === zoneName);
-            const agentIds = zoneAgents.map(a => a.id);
-            
-            const zoneTickets = (tickets || []).filter(t => agentIds.includes(t.agent_id) && !t.is_cancelled);
-            
-            const totalSales = zoneTickets.reduce((sum, t) => sum + (t.total_amount || 0), 0);
-            const totalWins = zoneTickets.filter(t => t.is_winner).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-            const totalCommission = zoneAgents.reduce((sum, a) => sum + (a.commission || 0), 0);
-            
-            report[zoneName] = {
-                totalSales,
-                totalWins,
-                totalCommission,
-                netProfit: totalSales - totalWins - totalCommission,
-                agentsCount: zoneAgents.length,
-                ticketsCount: zoneTickets.length
-            };
-        }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, report }));
-        return;
-    }
-    
-    // LIMITES DE BOULES (CORRIGÉ - utilise upsert)
-    if (url === '/api/number-limits' && req.method === 'GET') {
-        let { data: limits, error } = await supabase
-            .from('number_limits')
-            .select('*');
-        
-        const limitsObj = {
-            simple: { enabled: false, blockedNumbers: [] },
-            three: { enabled: false, blockedNumbers: [] },
-            five: { enabled: false, blockedNumbers: [] }
-        };
-        
-        if (limits) {
-            limits.forEach(l => {
-                if (limitsObj[l.type]) {
-                    limitsObj[l.type] = { enabled: l.enabled, blockedNumbers: l.blocked_numbers || [] };
-                }
+        if (agentsData.success && agentsData.agents) {
+            agentsData.agents.forEach(agent => {
+                const zone = agent.zone;
+                const totalSales = agent.totalSales || 0;
+                if (!salesByZone[zone]) salesByZone[zone] = 0;
+                salesByZone[zone] += totalSales;
             });
         }
         
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, limits: limitsObj }));
-        return;
-    }
-    
-    // UPDATE LIMITES (CORRIGÉ - utilise upsert)
-    if (url === '/api/update-number-limits' && req.method === 'POST') {
-        const body = await parseBody();
-        const { type, enabled, blockedNumbers } = body;
-        
-        // Vérifier si la ligne existe
-        let { data: existing } = await supabase
-            .from('number_limits')
-            .select('id')
-            .eq('type', type)
-            .single();
-        
-        let result;
-        if (existing) {
-            result = await supabase
-                .from('number_limits')
-                .update({ enabled: enabled, blocked_numbers: blockedNumbers })
-                .eq('type', type);
-        } else {
-            result = await supabase
-                .from('number_limits')
-                .insert([{ type: type, enabled: enabled, blocked_numbers: blockedNumbers }]);
+        if (pointsData.success && pointsData.paymentPoints) {
+            let html = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Point de paiement</th><th>Solde actuel</th><th>Ventes de la zone</th></tr></thead><tbody>';
+            pointsData.paymentPoints.forEach(p => {
+                const zoneSales = salesByZone[p.zone] || 0;
+                html += `<tr>
+                    <td><strong>${p.nom}</strong></td>
+                    <td>${(p.balance || 0).toLocaleString()} GDS</td>
+                    <td>${zoneSales.toLocaleString()} GDS</td>
+                </tr>`;
+            });
+            html += '</tbody><td></div>';
+            document.getElementById('paymentControl').innerHTML = html;
         }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-        return;
+    } catch (error) {
+        console.error('Erreur:', error);
     }
-    
-    // BLOQUER/DEBLOQUER AGENT
-    if (url === '/api/toggle-agent-block' && req.method === 'PUT') {
-        const body = await parseBody();
-        const { agentId, block } = body;
-        
-        let { error } = await supabase
-            .from('agents')
-            .update({ is_blocked: block })
-            .eq('id', agentId);
-        
-        if (error) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: error.message }));
-        } else {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
-        }
-        return;
-    }
-    
-    // STATS AGENT
-    if (url.startsWith('/api/agent-stats') && req.method === 'GET') {
-        const agentId = parseInt(url.split('=')[1]);
-        
-        let { data: agent, error: agentError } = await supabase
-            .from('agents')
-            .select('*')
-            .eq('id', agentId)
-            .single();
-        
-        let { data: tickets, error: ticketsError } = await supabase
-            .from('tickets')
-            .select('total_amount, win_amount, is_winner, is_cancelled')
-            .eq('agent_id', agentId);
-        
-        const validTickets = (tickets || []).filter(t => !t.is_cancelled);
-        const totalSales = validTickets.reduce((sum, t) => sum + (t.total_amount || 0), 0);
-        const totalWins = validTickets.filter(t => t.is_winner).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            success: true, 
-            stats: { 
-                totalSales, 
-                totalWins, 
-                netProfit: totalSales - totalWins,
-                commission: agent ? agent.commission || 0 : 0,
-                balance: agent ? agent.balance || 0 : 0
-            } 
-        }));
-        return;
-    }
-    
-    // SUPERVISEURS
-    if (url === '/api/supervisors' && req.method === 'GET') {
-        let { data: supervisors, error } = await supabase
-            .from('supervisors')
-            .select('*');
-        
-        const formattedSupervisors = (supervisors || []).map(s => ({
-            id: s.id,
-            username: s.username,
-            prenom: s.prenom,
-            nom: s.nom,
-            zone: s.zone,
-            isActive: s.is_active,
-            carteIdentite: s.carte_identite,
-            matriculeFiscale: s.matricule_fiscale,
-            dateNaissance: s.date_naissance,
-            dateInscription: s.date_inscription,
-            commission: s.commission || 0,
-            totalZoneSales: s.total_zone_sales || 0
-        }));
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, supervisors: formattedSupervisors }));
-        return;
-    }
-    
-    // CRÉER SUPERVISEUR (CORRIGÉ - retourne les données)
-    if (url === '/api/create-supervisor' && req.method === 'POST') {
-        const body = await parseBody();
-        
-        // Vérifier si le username existe déjà
-        const { data: existing } = await supabase
-            .from('supervisors')
-            .select('id')
-            .eq('username', body.username);
-        
-        if (existing && existing.length > 0) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Nom d\'utilisateur déjà existant' }));
-            return;
-        }
-        
-        const newSupervisor = {
-            username: body.username,
-            password: body.password,
-            prenom: body.prenom,
-            nom: body.nom,
-            zone: body.zone,
-            is_active: true,
-            carte_identite: body.carteIdentite,
-            matricule_fiscale: body.matriculeFiscale,
-            date_naissance: body.dateNaissance,
-            date_inscription: new Date().toISOString(),
-            commission: 0,
-            total_zone_sales: 0
-        };
-        
-        let { data: supervisor, error } = await supabase
-            .from('supervisors')
-            .insert([newSupervisor])
-            .select()
-            .single();
-        
-        if (error) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-            return;
-        }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, supervisor }));
-        return;
-    }
-    
-    // TIRAGES - SAVE (CORRIGÉ - évite les doublons)
-    if (url === '/api/save-drawing' && req.method === 'POST') {
-        const body = await parseBody();
-        const { drawingName, drawingNumber } = body;
-        
-        // Vérifier si le tirage existe déjà
-        const { data: existing } = await supabase
-            .from('drawings')
-            .select('id')
-            .eq('drawing_name', drawingName)
-            .eq('drawing_number', drawingNumber);
-        
-        if (existing && existing.length > 0) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Ce tirage a déjà été enregistré' }));
-            return;
-        }
-        
-        // Sauvegarder le tirage
-        await supabase
-            .from('drawings')
-            .insert([{
-                drawing_name: drawingName,
-                drawing_number: drawingNumber,
-                date: new Date().toISOString()
-            }]);
-        
-        // Récupérer tous les tickets pour ce tirage
-        let { data: tickets, error } = await supabase
-            .from('tickets')
-            .select('*')
-            .eq('drawing_name', drawingName)
-            .eq('is_winner', false)
-            .eq('is_cancelled', false);
-        
-        for (const ticket of (tickets || [])) {
-            let totalWin = 0;
-            const winItems = [];
-            
-            for (const item of (ticket.items || [])) {
-                const { winAmount, winType } = calculateWin(item, drawingNumber);
-                if (winAmount > 0) {
-                    totalWin += winAmount;
-                    winItems.push({ ...item, winAmount, winType });
-                }
-            }
-            
-            if (totalWin > 0) {
-                // Mettre à jour le ticket
-                await supabase
-                    .from('tickets')
-                    .update({
-                        is_winner: true,
-                        win_amount: totalWin,
-                        win_items: winItems
-                    })
-                    .eq('id', ticket.id);
-                
-                // Mettre à jour l'agent (débiter le gain)
-                let { data: agent } = await supabase
-                    .from('agents')
-                    .select('balance')
-                    .eq('id', ticket.agent_id)
-                    .single();
-                
-                if (agent) {
-                    await supabase
-                        .from('agents')
-                        .update({ balance: (agent.balance || 0) - totalWin })
-                        .eq('id', ticket.agent_id);
-                }
-                
-                // Ajouter transaction
-                await supabase
-                    .from('transactions')
-                    .insert([{
-                        type: 'gain',
-                        agent_id: ticket.agent_id,
-                        ticket_id: ticket.id,
-                        amount: -totalWin,
-                        date: new Date().toISOString(),
-                        description: `Gain sur ticket ${ticket.id} - ${totalWin} GDS`
-                    }]);
-            }
-        }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-        return;
-    }
-    
-    // TIRAGES - GET
-    if (url === '/api/drawings' && req.method === 'GET') {
-        let { data: drawings, error } = await supabase
-            .from('drawings')
-            .select('*')
-            .order('date', { ascending: false });
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, drawings: drawings || [] }));
-        return;
-    }
-    
-    // TICKETS PAR STATUT
-    if (url === '/api/tickets/by-status' && req.method === 'GET') {
-        let { data: tickets, error } = await supabase
-            .from('tickets')
-            .select('*');
-        
-        const now = new Date();
-        const threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-        
-        const winningTickets = (tickets || []).filter(t => t.is_winner && !t.is_cancelled);
-        const pendingTickets = (tickets || []).filter(t => !t.is_winner && !t.is_cancelled && !t.is_paid);
-        const expiredTickets = (tickets || []).filter(t => !t.is_winner && !t.is_cancelled && new Date(t.date) < threeMonthsAgo);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            success: true, 
-            winning: winningTickets,
-            pending: pendingTickets,
-            expired: expiredTickets
-        }));
-        return;
-    }
-    
-    // PAYER TICKET (NOUVELLE API)
-    if (url === '/api/pay-ticket' && req.method === 'POST') {
-        const body = await parseBody();
-        const { ticketId, paymentPointId } = body;
-        
-        // Récupérer le ticket
-        let { data: ticket, error: ticketError } = await supabase
-            .from('tickets')
-            .select('*')
-            .eq('id', ticketId)
-            .single();
-        
-        if (!ticket) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Ticket non trouvé' }));
-            return;
-        }
-        
-        if (!ticket.is_winner) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Ce ticket n\'est pas gagnant' }));
-            return;
-        }
-        
-        if (ticket.is_paid) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Ce ticket a déjà été payé' }));
-            return;
-        }
-        
-        // Récupérer le point de paiement
-        let { data: paymentPoint, error: pointError } = await supabase
-            .from('payment_points')
-            .select('*')
-            .eq('id', paymentPointId)
-            .single();
-        
-        if (!paymentPoint) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Point de paiement non trouvé' }));
-            return;
-        }
-        
-        // Vérifier si le point a assez de solde
-        if ((paymentPoint.balance || 0) < ticket.win_amount) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Solde insuffisant au point de paiement' }));
-            return;
-        }
-        
-        // Mettre à jour le ticket
-        await supabase
-            .from('tickets')
-            .update({ 
-                is_paid: true, 
-                paid_at: new Date().toISOString(),
-                paid_by_point: paymentPointId
-            })
-            .eq('id', ticketId);
-        
-        // Mettre à jour le point de paiement
-        await supabase
-            .from('payment_points')
-            .update({ balance: (paymentPoint.balance || 0) - ticket.win_amount })
-            .eq('id', paymentPointId);
-        
-        // Ajouter transaction
-        await supabase
-            .from('transactions')
-            .insert([{
-                type: 'paiement_gagnant',
-                ticket_id: ticketId,
-                payment_point_id: paymentPointId,
-                payment_point_name: paymentPoint.nom,
-                amount: -ticket.win_amount,
-                date: new Date().toISOString(),
-                description: `Paiement du ticket gagnant ${ticketId} - ${ticket.win_amount} GDS`
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: 'Ticket marqué comme payé' }));
-        return;
-    }
-    
-    // ==================== PETITE CAISSE - NOUVELLES ROUTES ====================
-    
-    // GET - Dashboard avec bénéfice net ET petite caisse
-    if (url === '/api/dashboard-full' && req.method === 'GET') {
-        let { data: tickets, error: ticketsError } = await supabase
-            .from('tickets')
-            .select('total_amount, win_amount, is_cancelled, is_winner');
-        
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('commission');
-        
-        const totalSales = (tickets || []).filter(t => !t.is_cancelled).reduce((sum, t) => sum + (t.total_amount || 0), 0);
-        const totalWins = (tickets || []).filter(t => t.is_winner && !t.is_cancelled).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-        const totalCommission = (agents || []).reduce((sum, a) => sum + (a.commission || 0), 0);
-        const netProfit = totalSales - totalWins - totalCommission;
-        
-        let { data: pettyCashData } = await supabase
-            .from('petty_cash')
-            .select('balance')
-            .order('created_at', { ascending: false })
-            .limit(1);
-        
-        let pettyCashBalance = (pettyCashData && pettyCashData.length > 0) ? pettyCashData[0].balance : 0;
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            success: true, 
-            stats: { totalSales, totalWins, totalCommission, netProfit },
-            pettyCash: { balance: pettyCashBalance }
-        }));
-        return;
-    }
-    
-    // POST - Forcer la synchronisation
-    if (url === '/api/sync-petty-cash' && req.method === 'POST') {
-        let { data: tickets, error: ticketsError } = await supabase
-            .from('tickets')
-            .select('total_amount, win_amount, is_cancelled, is_winner');
-        
-        let { data: agents, error: agentsError } = await supabase
-            .from('agents')
-            .select('commission');
-        
-        const totalSales = (tickets || []).filter(t => !t.is_cancelled).reduce((sum, t) => sum + (t.total_amount || 0), 0);
-        const totalWins = (tickets || []).filter(t => t.is_winner && !t.is_cancelled).reduce((sum, t) => sum + (t.win_amount || 0), 0);
-        const totalCommission = (agents || []).reduce((sum, a) => sum + (a.commission || 0), 0);
-        const netProfit = totalSales - totalWins - totalCommission;
-        
-        await supabase
-            .from('petty_cash')
-            .insert([{ 
-                balance: netProfit, 
-                created_at: new Date().toISOString(),
-                sync_note: 'Synchronisation automatique avec le bénéfice net'
-            }]);
-        
-        await supabase
-            .from('petty_cash_transactions')
-            .insert([{
-                type: 'sync',
-                amount: 0,
-                category: 'synchronisation',
-                description: `Synchronisation: solde petite caisse aligné sur bénéfice net (${netProfit.toLocaleString()} GDS)`,
-                admin_name: 'Système',
-                balance_after: netProfit,
-                date: new Date().toISOString()
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, netProfit: netProfit, message: 'Petite caisse synchronisée avec le bénéfice net' }));
-        return;
-    }
-    
-    // GET - Solde de la petite caisse
-    if (url === '/api/petty-cash/balance' && req.method === 'GET') {
-        let { data, error } = await supabase
-            .from('petty_cash')
-            .select('balance')
-            .order('created_at', { ascending: false })
-            .limit(1);
-        
-        let balance = 0;
-        if (data && data.length > 0) {
-            balance = data[0].balance;
-        } else {
-            const { data: newData, error: insertError } = await supabase
-                .from('petty_cash')
-                .insert([{ balance: 0, created_at: new Date().toISOString() }])
-                .select();
-            if (newData && newData.length > 0) balance = newData[0].balance;
-        }
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, balance: balance }));
-        return;
-    }
-    
-    // GET - Historique des transactions petite caisse
-    if (url === '/api/petty-cash/transactions' && req.method === 'GET') {
-        let { data: transactions, error } = await supabase
-            .from('petty_cash_transactions')
-            .select('*')
-            .order('date', { ascending: false })
-            .limit(100);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, transactions: transactions || [] }));
-        return;
-    }
-    
-    // POST - Nouvelle dépense
-    if (url === '/api/petty-cash/expense' && req.method === 'POST') {
-        const body = await parseBody();
-        const { amount, category, description, notes, adminName } = body;
-        
-        if (!amount || amount <= 0) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Montant invalide' }));
-            return;
-        }
-        
-        let { data: currentData } = await supabase
-            .from('petty_cash')
-            .select('balance')
-            .order('created_at', { ascending: false })
-            .limit(1);
-        
-        let currentBalance = currentData && currentData.length > 0 ? currentData[0].balance : 0;
-        let newBalance = currentBalance - amount;
-        
-        if (newBalance < 0 && !body.allowNegative) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Solde insuffisant' }));
-            return;
-        }
-        
-        await supabase
-            .from('petty_cash')
-            .insert([{ balance: newBalance, created_at: new Date().toISOString() }]);
-        
-        const transaction = {
-            type: 'expense',
-            amount: amount,
-            category: category,
-            description: description,
-            notes: notes,
-            admin_name: adminName || 'Admin',
-            balance_after: newBalance,
-            date: new Date().toISOString()
-        };
-        
-        await supabase
-            .from('petty_cash_transactions')
-            .insert([transaction]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, newBalance: newBalance }));
-        return;
-    }
-    
-    // POST - Alimenter un point de paiement depuis la petite caisse
-    if (url === '/api/petty-cash/transfer-to-payment-point' && req.method === 'POST') {
-        const body = await parseBody();
-        const { amount, paymentPointId, notes, adminName } = body;
-        
-        if (!amount || amount <= 0 || !paymentPointId) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Données invalides' }));
-            return;
-        }
-        
-        let { data: cashData } = await supabase
-            .from('petty_cash')
-            .select('balance')
-            .order('created_at', { ascending: false })
-            .limit(1);
-        
-        let currentBalance = cashData && cashData.length > 0 ? cashData[0].balance : 0;
-        
-        if (currentBalance < amount) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Solde petite caisse insuffisant' }));
-            return;
-        }
-        
-        let { data: paymentPoint } = await supabase
-            .from('payment_points')
-            .select('*')
-            .eq('id', paymentPointId)
-            .single();
-        
-        if (!paymentPoint) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Point de paiement non trouvé' }));
-            return;
-        }
-        
-        const newCashBalance = currentBalance - amount;
-        const newPointBalance = (paymentPoint.balance || 0) + amount;
-        
-        await supabase
-            .from('petty_cash')
-            .insert([{ balance: newCashBalance, created_at: new Date().toISOString() }]);
-        
-        await supabase
-            .from('payment_points')
-            .update({ balance: newPointBalance })
-            .eq('id', paymentPointId);
-        
-        const transaction = {
-            type: 'transfer_to_payment_point',
-            amount: amount,
-            category: 'transfert',
-            description: `Transfert vers ${paymentPoint.nom}`,
-            notes: notes || `Alimentation du point ${paymentPoint.nom}`,
-            admin_name: adminName || 'Admin',
-            payment_point_id: paymentPointId,
-            payment_point_name: paymentPoint.nom,
-            balance_after: newCashBalance,
-            date: new Date().toISOString()
-        };
-        
-        await supabase
-            .from('petty_cash_transactions')
-            .insert([transaction]);
-        
-        await supabase
-            .from('transactions')
-            .insert([{
-                type: 'alimentation_point',
-                payment_point_id: paymentPointId,
-                payment_point_name: paymentPoint.nom,
-                amount: amount,
-                date: new Date().toISOString(),
-                description: `Alimentation du point ${paymentPoint.nom} depuis la petite caisse`
-            }]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, newBalance: newCashBalance }));
-        return;
-    }
-    
-    // POST - Recharger la petite caisse
-    if (url === '/api/petty-cash/topup' && req.method === 'POST') {
-        const body = await parseBody();
-        const { amount, source, notes, adminName } = body;
-        
-        if (!amount || amount <= 0) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Montant invalide' }));
-            return;
-        }
-        
-        let { data: currentData } = await supabase
-            .from('petty_cash')
-            .select('balance')
-            .order('created_at', { ascending: false })
-            .limit(1);
-        
-        let currentBalance = currentData && currentData.length > 0 ? currentData[0].balance : 0;
-        let newBalance = currentBalance + amount;
-        
-        await supabase
-            .from('petty_cash')
-            .insert([{ balance: newBalance, created_at: new Date().toISOString() }]);
-        
-        const transaction = {
-            type: 'topup',
-            amount: amount,
-            category: 'rechargement',
-            description: `Rechargement depuis ${source || 'ventes'}`,
-            notes: notes,
-            admin_name: adminName || 'Admin',
-            balance_after: newBalance,
-            date: new Date().toISOString()
-        };
-        
-        await supabase
-            .from('petty_cash_transactions')
-            .insert([transaction]);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, newBalance: newBalance }));
-        return;
-    }
-    
-    // GET - Stats petite caisse
-    if (url === '/api/petty-cash/stats' && req.method === 'GET') {
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        
-        let { data: transactions, error } = await supabase
-            .from('petty_cash_transactions')
-            .select('*')
-            .gte('date', startOfMonth);
-        
-        let totalExpenses = 0;
-        let totalTopups = 0;
-        let totalTransfers = 0;
-        
-        (transactions || []).forEach(t => {
-            if (t.type === 'expense') totalExpenses += t.amount;
-            else if (t.type === 'topup') totalTopups += t.amount;
-            else if (t.type === 'transfer_to_payment_point') totalTransfers += t.amount;
-        });
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            success: true, 
-            stats: {
-                totalExpenses,
-                totalTopups,
-                totalTransfers,
-                netChange: totalTopups - totalExpenses - totalTransfers
-            }
-        }));
-        return;
-    }
-    
-    // Route par défaut
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ message: "Route non trouvée" }));
-});
-
-const PORT = process.env.PORT || 3000;
-
-// Démarrer le serveur localement
-if (process.env.NODE_ENV !== 'production') {
-    server.listen(PORT, () => {
-        console.log(`✅ Serveur Borlette avec Supabase actif sur port: ${PORT}`);
-    });
 }
 
-module.exports = server;
+// ========== COMMISSIONS ==========
+async function loadCommissions() {
+    try {
+        const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
+        const agentsData = await agentsRes.json();
+        
+        if (agentsData.success && agentsData.agents) {
+            let html = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Agent</th><th>Zone</th><th>Commission (5%)</th><th>Total ventes</th></tr></thead><tbody>';
+            agentsData.agents.forEach(a => {
+                const totalSales = a.totalSales || 0;
+                const commission = totalSales * 0.05;
+                html += `<tr>
+                    <td><strong>${a.agentName || a.name}</strong><br><small>${a.username}</small></td>
+                    <td>${a.zone}</td>
+                    <td class="commission-value">${commission.toLocaleString()} GDS</td>
+                    <td>${totalSales.toLocaleString()} GDS</td>
+                </tr>`;
+            });
+            html += '</tbody></table></div>';
+            document.getElementById('agentCommissions').innerHTML = html;
+        }
+        
+        const pointsRes = await fetch(`${API_BASE_URL}/api/payment-points`);
+        const pointsData = await pointsRes.json();
+        
+        if (pointsData.success && pointsData.paymentPoints) {
+            const agentsRes2 = await fetch(`${API_BASE_URL}/api/agents`);
+            const agentsData2 = await agentsRes2.json();
+            const commissionByZone = {};
+            if (agentsData2.success && agentsData2.agents) {
+                agentsData2.agents.forEach(a => {
+                    const zone = a.zone;
+                    const totalSales = a.totalSales || 0;
+                    const commission = totalSales * 0.05;
+                    if (!commissionByZone[zone]) commissionByZone[zone] = 0;
+                    commissionByZone[zone] += commission;
+                });
+            }
+            
+            let html = '<div class="table-responsive"><table class="data-table"><thead><tr><th>Point de paiement</th><th>Zone</th><th>Commission totale</th></tr></thead><tbody>';
+            pointsData.paymentPoints.forEach(p => {
+                const zoneCommission = commissionByZone[p.zone] || 0;
+                html += `<tr>
+                    <td><strong>${p.nom}</strong></td>
+                    <td>${p.zone}</td>
+                    <td>${zoneCommission.toLocaleString()} GDS</td>
+                </tr>`;
+            });
+            html += '</tbody></table></div>';
+            document.getElementById('paymentPointCommissions').innerHTML = html;
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+// ========== TIRAGES ==========
+async function loadDrawingsHistory() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/drawings`);
+        const data = await response.json();
+        
+        if (data.success && data.drawings) {
+            const historyHtml = data.drawings.map(d => `
+                <div class="history-item">
+                    <strong>${d.drawing_name}</strong><br>
+                    Numéro: ${d.drawing_number}<br>
+                    Date: ${new Date(d.date).toLocaleString()}
+                </div>
+            `).join('');
+            document.getElementById('drawingsHistory').innerHTML = historyHtml || '<p>Aucun tirage enregistré</p>';
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+    }
+}
+
+async function saveDrawing() {
+    const drawingName = document.getElementById('drawingSelect').value;
+    const drawingNumber = document.getElementById('drawingNumber').value.trim();
+    
+    if (!drawingNumber) {
+        showToast('Entrez le numéro gagnant', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/save-drawing`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ drawingName, drawingNumber })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('✅ Tirage enregistré !', 'success');
+            document.getElementById('drawingNumber').value = '';
+            loadDrawingsHistory();
+            loadDashboard();
+            loadAllTickets();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== DÉCHARGEMENT ==========
+async function makeDeposit() {
+    const agentId = parseInt(document.getElementById('depositAgentId').value);
+    const paymentPointId = parseInt(document.getElementById('depositPointId').value);
+    const amount = parseInt(document.getElementById('depositAmount').value);
+    const notes = document.getElementById('depositNotes').value;
+    
+    if (!agentId || !paymentPointId || !amount || amount <= 0) {
+        showToast('Remplissez tous les champs correctement', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/deposit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId, amount, paymentPointId, notes })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`✅ Déchargement effectué ! Nouveau solde: ${data.newBalance.toLocaleString()} GDS`, 'success');
+            document.getElementById('depositAgentId').value = '';
+            document.getElementById('depositAmount').value = '';
+            document.getElementById('depositNotes').value = '';
+            loadUsers();
+            loadPaymentPoints();
+            loadTransactions();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== TRANSFERT ==========
+async function makeTransfer() {
+    const fromPointId = parseInt(document.getElementById('transferFrom').value);
+    const toPointId = parseInt(document.getElementById('transferTo').value);
+    const amount = parseInt(document.getElementById('transferAmount').value);
+    const notes = document.getElementById('transferNotes').value;
+    
+    if (!fromPointId || !toPointId || !amount || amount <= 0) {
+        showToast('Remplissez tous les champs', 'error');
+        return;
+    }
+    
+    if (fromPointId === toPointId) {
+        showToast('Impossible de transférer vers le même point', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/transfer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fromPointId, toPointId, amount, notes })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('✅ Transfert effectué avec succès !', 'success');
+            document.getElementById('transferAmount').value = '';
+            document.getElementById('transferNotes').value = '';
+            loadPaymentPoints();
+            loadTransactions();
+        } else {
+            showToast(data.message || '❌ Erreur', 'error');
+        }
+    } catch (error) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+// ========== FONCTIONS UTILITAIRES ==========
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : (type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle')}"></i> ${message}`;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+        background: ${type === 'success' ? '#28a745' : (type === 'error' ? '#dc3545' : '#17a2b8')};
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// ========== MENU MOBILE ==========
+function toggleSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.querySelector('.sidebar-overlay');
+    if (sidebar) sidebar.classList.toggle('open');
+    if (overlay) overlay.classList.toggle('active');
+}
+
+function closeSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.querySelector('.sidebar-overlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('active');
+}
+
+function closeSidebarAfterClick() {
+    if (window.innerWidth <= 768) {
+        setTimeout(() => closeSidebar(), 300);
+    }
+}
+
+// ========== MODE SOMBRE ==========
+function initDarkMode() {
+    const darkMode = localStorage.getItem('darkMode');
+    if (darkMode === 'enabled') {
+        document.body.classList.add('dark-mode');
+        const toggleBtn = document.getElementById('darkModeToggle');
+        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-sun"></i>';
+    }
+}
+
+function toggleDarkMode() {
+    const toggleBtn = document.getElementById('darkModeToggle');
+    if (document.body.classList.contains('dark-mode')) {
+        document.body.classList.remove('dark-mode');
+        localStorage.setItem('darkMode', 'disabled');
+        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-moon"></i>';
+    } else {
+        document.body.classList.add('dark-mode');
+        localStorage.setItem('darkMode', 'enabled');
+        if (toggleBtn) toggleBtn.innerHTML = '<i class="fas fa-sun"></i>';
+    }
+}
+
+// ========== INITIALISATION ==========
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialiser les filtres
+    const searchTicket = document.getElementById('searchTicket');
+    const filterZone = document.getElementById('filterZone');
+    const filterStatus = document.getElementById('filterStatus');
+    if (searchTicket) searchTicket.addEventListener('input', loadAllTickets);
+    if (filterZone) filterZone.addEventListener('change', loadAllTickets);
+    if (filterStatus) filterStatus.addEventListener('change', loadAllTickets);
+    
+    const filterTransaction = document.getElementById('filterTransaction');
+    const filterTransactionType = document.getElementById('filterTransactionType');
+    if (filterTransaction) filterTransaction.addEventListener('input', loadTransactions);
+    if (filterTransactionType) filterTransactionType.addEventListener('change', loadTransactions);
+    
+    const filterPettyCash = document.getElementById('filterPettyCash');
+    const filterPettyCashType = document.getElementById('filterPettyCashType');
+    if (filterPettyCash) filterPettyCash.addEventListener('input', loadPettyCashTransactions);
+    if (filterPettyCashType) filterPettyCashType.addEventListener('change', loadPettyCashTransactions);
+    
+    // Charger les zones dans le filtre
+    const zoneSelect = document.getElementById('filterZone');
+    if (zoneSelect) {
+        const zones = ['tabarre', 'delmas', 'petion-ville', 'bois-moquette', 'dezermith', 'fermathe', 'clercine', 'carrefour', 'gerald', 'fort-dimanche'];
+        zones.forEach(zone => {
+            const option = document.createElement('option');
+            option.value = zone;
+            option.textContent = zone.charAt(0).toUpperCase() + zone.slice(1);
+            zoneSelect.appendChild(option);
+        });
+    }
+    
+    // Mode sombre
+    initDarkMode();
+    const toggleBtn = document.getElementById('darkModeToggle');
+    if (toggleBtn) toggleBtn.addEventListener('click', toggleDarkMode);
+    
+    // Touche Entrée pour la connexion
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    function handleEnter(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            adminLogin();
+        }
+    }
+    if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
+    if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
+    
+    // Animation CSS pour les toasts
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+        .commission-value {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .toast {
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            font-weight: bold;
+        }
+    `;
+    document.head.appendChild(style);
+});
+
+// Gestion du redimensionnement
+window.addEventListener('resize', function() {
+    const menuToggle = document.querySelector('.menu-toggle');
+    if (window.innerWidth <= 768) {
+        if (menuToggle) menuToggle.style.display = 'block';
+    } else {
+        if (menuToggle) menuToggle.style.display = 'none';
+        closeSidebar();
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) sidebar.classList.remove('open');
+    }
+});
