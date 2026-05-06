@@ -160,6 +160,76 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
+    // ==================== SÉCURITÉ - VALIDATION CODE PIN ====================
+    // Vérification du code PIN pour sécuriser les POS
+    if (url === '/api/verify-pos-pin' && req.method === 'POST') {
+        const body = await parseBody();
+        const { pinCode, deviceId, posName } = body;
+        
+        let { data: validPin, error } = await supabase
+            .from('pos_pins')
+            .select('*')
+            .eq('pin_code', pinCode)
+            .eq('is_active', true)
+            .single();
+        
+        if (validPin) {
+            await supabase
+                .from('authorized_devices')
+                .upsert({ 
+                    device_id: deviceId,
+                    pos_name: posName || validPin.pos_name,
+                    pin_code: pinCode,
+                    last_seen: new Date().toISOString(),
+                    is_active: true
+                });
+            
+            await supabase
+                .from('pos_pins')
+                .update({ last_used: new Date().toISOString(), used_count: (validPin.used_count || 0) + 1 })
+                .eq('id', validPin.id);
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+                success: true, 
+                message: 'POS autorisé',
+                posName: validPin.pos_name,
+                zone: validPin.zone
+            }));
+        } else {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Code PIN invalide ou inactif' }));
+        }
+        return;
+    }
+    
+    // Vérifier si un appareil est autorisé
+    if (url === '/api/check-device' && req.method === 'POST') {
+        const body = await parseBody();
+        const { deviceId } = body;
+        
+        let { data: device, error } = await supabase
+            .from('authorized_devices')
+            .select('*')
+            .eq('device_id', deviceId)
+            .eq('is_active', true)
+            .single();
+        
+        if (device) {
+            await supabase
+                .from('authorized_devices')
+                .update({ last_seen: new Date().toISOString() })
+                .eq('device_id', deviceId);
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, authorized: true, posName: device.pos_name }));
+        } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, authorized: false }));
+        }
+        return;
+    }
+    
     // LOGIN (CORRIGÉ - gère correctement les admins)
     if (url === '/api/login' && req.method === 'POST') {
         const body = await parseBody();
@@ -549,12 +619,24 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // POINTS DE PAIEMENT
+    // ==================== POINTS DE PAIEMENT (CORRIGÉ) ====================
+    // GET - Points de paiement avec solde incluant les ventes de la zone
     if (url === '/api/payment-points' && req.method === 'GET') {
         let { data: paymentPoints, error } = await supabase
             .from('payment_points')
             .select('*')
             .order('id');
+        
+        // Calculer les ventes par zone
+        let { data: agents, error: agentsError } = await supabase
+            .from('agents')
+            .select('zone, total_sales');
+        
+        const salesByZone = {};
+        (agents || []).forEach(a => {
+            if (!salesByZone[a.zone]) salesByZone[a.zone] = 0;
+            salesByZone[a.zone] += (a.total_sales || 0);
+        });
         
         const formattedPoints = (paymentPoints || []).map(p => ({
             id: p.id,
@@ -563,7 +645,9 @@ const server = http.createServer(async (req, res) => {
             departement: p.departement,
             zone: p.zone,
             isActive: p.is_active,
-            balance: p.balance || 0,
+            balance: (salesByZone[p.zone] || 0) + (p.balance || 0),
+            balance_ventes: salesByZone[p.zone] || 0,
+            balance_transferts: p.balance || 0,
             totalTransactions: p.total_transactions,
             dateCreation: p.date_creation
         }));
@@ -1255,7 +1339,80 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: true, message: 'Ticket marqué comme payé' }));
         return;
     }
-        // ==================== PETITE CAISSE - NOUVELLES ROUTES ====================
+    
+    // ==================== PETITE CAISSE - NOUVELLES ROUTES ====================
+    
+    // GET - Dashboard avec bénéfice net ET petite caisse
+    if (url === '/api/dashboard-full' && req.method === 'GET') {
+        let { data: tickets, error: ticketsError } = await supabase
+            .from('tickets')
+            .select('total_amount, win_amount, is_cancelled, is_winner');
+        
+        let { data: agents, error: agentsError } = await supabase
+            .from('agents')
+            .select('commission');
+        
+        const totalSales = (tickets || []).filter(t => !t.is_cancelled).reduce((sum, t) => sum + (t.total_amount || 0), 0);
+        const totalWins = (tickets || []).filter(t => t.is_winner && !t.is_cancelled).reduce((sum, t) => sum + (t.win_amount || 0), 0);
+        const totalCommission = (agents || []).reduce((sum, a) => sum + (a.commission || 0), 0);
+        const netProfit = totalSales - totalWins - totalCommission;
+        
+        let { data: pettyCashData } = await supabase
+            .from('petty_cash')
+            .select('balance')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        
+        let pettyCashBalance = (pettyCashData && pettyCashData.length > 0) ? pettyCashData[0].balance : 0;
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            success: true, 
+            stats: { totalSales, totalWins, totalCommission, netProfit },
+            pettyCash: { balance: pettyCashBalance }
+        }));
+        return;
+    }
+    
+    // POST - Forcer la synchronisation
+    if (url === '/api/sync-petty-cash' && req.method === 'POST') {
+        let { data: tickets, error: ticketsError } = await supabase
+            .from('tickets')
+            .select('total_amount, win_amount, is_cancelled, is_winner');
+        
+        let { data: agents, error: agentsError } = await supabase
+            .from('agents')
+            .select('commission');
+        
+        const totalSales = (tickets || []).filter(t => !t.is_cancelled).reduce((sum, t) => sum + (t.total_amount || 0), 0);
+        const totalWins = (tickets || []).filter(t => t.is_winner && !t.is_cancelled).reduce((sum, t) => sum + (t.win_amount || 0), 0);
+        const totalCommission = (agents || []).reduce((sum, a) => sum + (a.commission || 0), 0);
+        const netProfit = totalSales - totalWins - totalCommission;
+        
+        await supabase
+            .from('petty_cash')
+            .insert([{ 
+                balance: netProfit, 
+                created_at: new Date().toISOString(),
+                sync_note: 'Synchronisation automatique avec le bénéfice net'
+            }]);
+        
+        await supabase
+            .from('petty_cash_transactions')
+            .insert([{
+                type: 'sync',
+                amount: 0,
+                category: 'synchronisation',
+                description: `Synchronisation: solde petite caisse aligné sur bénéfice net (${netProfit.toLocaleString()} GDS)`,
+                admin_name: 'Système',
+                balance_after: netProfit,
+                date: new Date().toISOString()
+            }]);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, netProfit: netProfit, message: 'Petite caisse synchronisée avec le bénéfice net' }));
+        return;
+    }
     
     // GET - Solde de la petite caisse
     if (url === '/api/petty-cash/balance' && req.method === 'GET') {
@@ -1269,7 +1426,6 @@ const server = http.createServer(async (req, res) => {
         if (data && data.length > 0) {
             balance = data[0].balance;
         } else {
-            // Créer un enregistrement initial
             const { data: newData, error: insertError } = await supabase
                 .from('petty_cash')
                 .insert([{ balance: 0, created_at: new Date().toISOString() }])
@@ -1306,7 +1462,6 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        // Récupérer le solde actuel
         let { data: currentData } = await supabase
             .from('petty_cash')
             .select('balance')
@@ -1322,12 +1477,10 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        // Mettre à jour le solde
         await supabase
             .from('petty_cash')
             .insert([{ balance: newBalance, created_at: new Date().toISOString() }]);
         
-        // Enregistrer la transaction
         const transaction = {
             type: 'expense',
             amount: amount,
@@ -1339,13 +1492,12 @@ const server = http.createServer(async (req, res) => {
             date: new Date().toISOString()
         };
         
-        let { data: transactionData, error: transError } = await supabase
+        await supabase
             .from('petty_cash_transactions')
-            .insert([transaction])
-            .select();
+            .insert([transaction]);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, newBalance: newBalance, transaction: transaction }));
+        res.end(JSON.stringify({ success: true, newBalance: newBalance }));
         return;
     }
     
@@ -1360,7 +1512,6 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        // Récupérer le solde actuel de la petite caisse
         let { data: cashData } = await supabase
             .from('petty_cash')
             .select('balance')
@@ -1375,7 +1526,6 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        // Récupérer le point de paiement
         let { data: paymentPoint } = await supabase
             .from('payment_points')
             .select('*')
@@ -1391,24 +1541,21 @@ const server = http.createServer(async (req, res) => {
         const newCashBalance = currentBalance - amount;
         const newPointBalance = (paymentPoint.balance || 0) + amount;
         
-        // Mettre à jour petite caisse
         await supabase
             .from('petty_cash')
             .insert([{ balance: newCashBalance, created_at: new Date().toISOString() }]);
         
-        // Mettre à jour point de paiement
         await supabase
             .from('payment_points')
             .update({ balance: newPointBalance })
             .eq('id', paymentPointId);
         
-        // Enregistrer la transaction
         const transaction = {
             type: 'transfer_to_payment_point',
             amount: amount,
             category: 'transfert',
             description: `Transfert vers ${paymentPoint.nom}`,
-            notes: notes || `Alimentation du point ${paymentPoint.nom} pour paiement des gains`,
+            notes: notes || `Alimentation du point ${paymentPoint.nom}`,
             admin_name: adminName || 'Admin',
             payment_point_id: paymentPointId,
             payment_point_name: paymentPoint.nom,
@@ -1420,7 +1567,6 @@ const server = http.createServer(async (req, res) => {
             .from('petty_cash_transactions')
             .insert([transaction]);
         
-        // Ajouter une transaction dans le module transactions
         await supabase
             .from('transactions')
             .insert([{
@@ -1437,7 +1583,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // POST - Recharger la petite caisse depuis les ventes
+    // POST - Recharger la petite caisse
     if (url === '/api/petty-cash/topup' && req.method === 'POST') {
         const body = await parseBody();
         const { amount, source, notes, adminName } = body;
@@ -1448,7 +1594,6 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        // Récupérer le solde actuel
         let { data: currentData } = await supabase
             .from('petty_cash')
             .select('balance')
@@ -1458,12 +1603,10 @@ const server = http.createServer(async (req, res) => {
         let currentBalance = currentData && currentData.length > 0 ? currentData[0].balance : 0;
         let newBalance = currentBalance + amount;
         
-        // Mettre à jour le solde
         await supabase
             .from('petty_cash')
             .insert([{ balance: newBalance, created_at: new Date().toISOString() }]);
         
-        // Enregistrer la transaction
         const transaction = {
             type: 'topup',
             amount: amount,
@@ -1484,7 +1627,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // GET - Stats petite caisse (par mois)
+    // GET - Stats petite caisse
     if (url === '/api/petty-cash/stats' && req.method === 'GET') {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -1516,6 +1659,7 @@ const server = http.createServer(async (req, res) => {
         }));
         return;
     }
+    
     // Route par défaut
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ message: "Route non trouvée" }));
