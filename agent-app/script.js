@@ -15,6 +15,9 @@ if (!deviceId) {
 
 async function verifyPOSPin() {
     const storedPin = localStorage.getItem('posPin');
+    // Nettoyer le code PIN (enlever les tirets espaces etc.)
+enteredPin = enteredPin.replace(/-/g, '').replace(/\s/g, '');
+localStorage.setItem('posPin', enteredPin);
     
     // Si pas de PIN stocké, demander à l'utilisateur
     if (!storedPin) {
