@@ -162,9 +162,11 @@ const server = http.createServer(async (req, res) => {
     
     // ==================== SÉCURITÉ - VALIDATION CODE PIN ====================
     // Vérification du code PIN pour sécuriser les POS
-    if (url === '/api/verify-pos-pin' && req.method === 'POST') {
-        const body = await parseBody();
-        const { pinCode, deviceId, posName } = body;
+    // ================== SÉCURITÉ - VALIDATION CODE PIN ==================
+// Vérification du code PIN pour sécuriser les POS
+if (url === '/api/verify-pos-pin' && req.method === 'POST') {
+    const body = await parseBody();
+    const { pinCode, deviceId, posName } = body;
         
         let { data: validPin, error } = await supabase
             .from('pos_pins')
