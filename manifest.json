@@ -1,0 +1,18 @@
+{
+  "name": "Borlette Pro",
+  "short_name": "Borlette",
+  "description": "Système de gestion de borlette pour agents et administrateurs",
+  "start_url": "/agent-app/index.html",
+  "display": "standalone",
+  "background_color": "#1e3c72",
+  "theme_color": "#ff6b6b",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icon/icon-100.png",
+      "sizes": "100x100",
+      "type": "image/png"
+    }
+  ]
+}
