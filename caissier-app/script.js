@@ -360,9 +360,15 @@ async function makeTransfer() {
             resultDiv.innerHTML = `<span style="color:green;">✅ ${amount.toLocaleString()} GDS transférés</span>`;
             document.getElementById('transferAmount').value = '';
             document.getElementById('transferNotes').value = '';
+            
+            // Mettre à jour le solde local immédiatement
+            currentPointBalance = currentPointBalance - amount;
+            document.getElementById('pointBalance').innerHTML = currentPointBalance.toLocaleString() + ' GDS';
+            
             await loadPointBalance();
             await loadDailyReport();
             await loadTransactions();
+            await loadPaymentPoints();
         } else {
             resultDiv.innerHTML = `<span style="color:red;">❌ ${data.message}</span>`;
         }
@@ -381,43 +387,39 @@ async function loadTransactions() {
         const data = await response.json();
         
         if (data.success && data.transactions) {
-            const myTransactions = data.transactions
-                .filter(t => {
-                    return t.payment_point_id === currentUser?.id || 
-                           t.from_point_id === currentUser?.id ||
-                           t.to_point_id === currentUser?.id;
-                })
-                .slice(0, 30);
+            // Prendre les 30 dernières transactions
+            const myTransactions = data.transactions.slice(0, 30);
             
             const html = myTransactions.map(t => {
                 let typeLabel = '';
                 let amountValue = t.amount;
+                let colorClass = '';
                 
                 switch(t.type) {
                     case 'vente':
                         typeLabel = '💰 VENTE';
+                        colorClass = 'sale';
                         break;
                     case 'paiement_gagnant':
                         typeLabel = '🏆 PAIEMENT GAGNANT';
                         amountValue = -Math.abs(t.amount);
+                        colorClass = 'payout';
                         break;
                     case 'dechargement':
                         typeLabel = '📥 DÉCHARGEMENT';
+                        colorClass = 'deposit';
                         break;
                     case 'transfert':
-                        if (t.from_point_id === currentUser?.id) {
-                            typeLabel = '🔄 TRANSFERT SORTANT';
-                            amountValue = -t.amount;
-                        } else {
-                            typeLabel = '🔄 TRANSFERT ENTRANT';
-                        }
+                        typeLabel = '🔄 TRANSFERT';
+                        colorClass = 'transfer';
                         break;
                     default:
                         typeLabel = t.type.toUpperCase();
+                        colorClass = 'other';
                 }
                 
                 return `
-                    <div class="transaction-item ${t.type}">
+                    <div class="transaction-item ${colorClass}">
                         <div><strong>${typeLabel}</strong> - ${new Date(t.date).toLocaleString()}</div>
                         <div>${t.description || ''}</div>
                         <div class="amount ${amountValue < 0 ? 'negative' : 'positive'}">
@@ -431,6 +433,7 @@ async function loadTransactions() {
         }
     } catch (error) {
         console.error('Erreur:', error);
+        document.getElementById('transactionsList').innerHTML = '<p>Erreur de chargement</p>';
     }
 }
 
@@ -445,20 +448,17 @@ async function loadDailyReport() {
         const data = await response.json();
         
         if (data.success && data.transactions) {
-            const myTransactions = data.transactions.filter(t => {
-                const isForThisPoint = t.payment_point_id === currentUser.id || 
-                                       t.from_point_id === currentUser.id ||
-                                       t.to_point_id === currentUser.id;
-                const isToday = new Date(t.date).toISOString().split('T')[0] === today;
-                return isForThisPoint && isToday;
-            });
-            
             let sales = 0;
             let payouts = 0;
             let deposits = 0;
             let transfersOut = 0;
             
-            myTransactions.forEach(t => {
+            data.transactions.forEach(t => {
+                const transactionDate = new Date(t.date).toISOString().split('T')[0];
+                const isToday = transactionDate === today;
+                
+                if (!isToday) return;
+                
                 switch(t.type) {
                     case 'vente':
                         sales += t.amount;
@@ -474,11 +474,6 @@ async function loadDailyReport() {
                             transfersOut += t.amount;
                         }
                         break;
-                    case 'alimentation_point':
-                        if (t.payment_point_id === currentUser.id) {
-                            deposits += t.amount;
-                        }
-                        break;
                 }
             });
             
@@ -488,13 +483,27 @@ async function loadDailyReport() {
             document.getElementById('reportTransfers').innerHTML = transfersOut.toLocaleString() + ' GDS';
             document.getElementById('reportBalance').innerHTML = currentPointBalance.toLocaleString() + ' GDS';
             
-            // Mettre à jour aussi les stats du haut
+            // Mettre à jour les stats du haut
             document.getElementById('todaySales').innerHTML = sales.toLocaleString() + ' GDS';
             document.getElementById('totalPayouts').innerHTML = payouts.toLocaleString() + ' GDS';
         }
     } catch (error) {
         console.error('Erreur chargement rapport:', error);
     }
+}
+
+// ========== RAFRAÎCHIR TOUTES LES DONNÉES ==========
+async function refreshAll() {
+    showError('Rafraîchissement en cours...');
+    await loadPointBalance();
+    await loadDailyReport();
+    await loadTransactions();
+    await loadPaymentPoints();
+    showError('Données mises à jour !');
+    setTimeout(() => {
+        const errorDiv = document.getElementById('errorMsg');
+        if (errorDiv) errorDiv.style.display = 'none';
+    }, 2000);
 }
 
 function printReport() {
