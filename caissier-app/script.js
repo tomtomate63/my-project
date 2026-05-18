@@ -34,13 +34,15 @@ async function login() {
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('appPage').style.display = 'block';
             
-            loadPointBalance();
-            loadTransactions();
-            loadPaymentPoints();
+            await loadPointBalance();
+            await loadDailyReport();
+            await loadTransactions();
+            await loadPaymentPoints();
         } else {
             showError('Accès non autorisé - Compte caissier requis');
         }
     } catch (error) {
+        console.error('Erreur:', error);
         showError('Erreur de connexion au serveur');
     }
 }
@@ -217,12 +219,14 @@ async function printTicket() {
             currentItems = [];
             updateItemsDisplay();
             document.getElementById('clientName').value = '';
-            loadPointBalance();
-            loadTransactions();
+            await loadPointBalance();
+            await loadDailyReport();
+            await loadTransactions();
         } else {
             alert('❌ ' + data.message);
         }
     } catch (error) {
+        console.error('Erreur:', error);
         alert('Erreur de connexion');
     }
 }
@@ -239,7 +243,6 @@ async function makeDeposit() {
     }
     
     try {
-        // Chercher l'agent par ID ou nom
         const agentsRes = await fetch(`${API_BASE_URL}/api/agents`);
         const agentsData = await agentsRes.json();
         
@@ -269,14 +272,16 @@ async function makeDeposit() {
             document.getElementById('depositAgentId').value = '';
             document.getElementById('depositAmount').value = '';
             document.getElementById('depositNotes').value = '';
-            loadPointBalance();
-            loadTransactions();
+            await loadPointBalance();
+            await loadDailyReport();
+            await loadTransactions();
         } else {
             resultDiv.innerHTML = `<span style="color:red;">❌ ${data.message}</span>`;
         }
         
         setTimeout(() => resultDiv.innerHTML = '', 3000);
     } catch (error) {
+        console.error('Erreur:', error);
         alert('Erreur de connexion');
     }
 }
@@ -306,14 +311,16 @@ async function payTicket() {
         if (data.success) {
             resultDiv.innerHTML = `<span style="color:green;">✅ ${data.message}</span>`;
             document.getElementById('payTicketId').value = '';
-            loadPointBalance();
-            loadTransactions();
+            await loadPointBalance();
+            await loadDailyReport();
+            await loadTransactions();
         } else {
             resultDiv.innerHTML = `<span style="color:red;">❌ ${data.message}</span>`;
         }
         
         setTimeout(() => resultDiv.innerHTML = '', 3000);
     } catch (error) {
+        console.error('Erreur:', error);
         alert('Erreur de connexion');
     }
 }
@@ -353,14 +360,16 @@ async function makeTransfer() {
             resultDiv.innerHTML = `<span style="color:green;">✅ ${amount.toLocaleString()} GDS transférés</span>`;
             document.getElementById('transferAmount').value = '';
             document.getElementById('transferNotes').value = '';
-            loadPointBalance();
-            loadTransactions();
+            await loadPointBalance();
+            await loadDailyReport();
+            await loadTransactions();
         } else {
             resultDiv.innerHTML = `<span style="color:red;">❌ ${data.message}</span>`;
         }
         
         setTimeout(() => resultDiv.innerHTML = '', 3000);
     } catch (error) {
+        console.error('Erreur:', error);
         alert('Erreur de connexion');
     }
 }
@@ -373,16 +382,50 @@ async function loadTransactions() {
         
         if (data.success && data.transactions) {
             const myTransactions = data.transactions
-                .filter(t => t.payment_point_id === currentUser?.id)
-                .slice(0, 20);
+                .filter(t => {
+                    return t.payment_point_id === currentUser?.id || 
+                           t.from_point_id === currentUser?.id ||
+                           t.to_point_id === currentUser?.id;
+                })
+                .slice(0, 30);
             
-            const html = myTransactions.map(t => `
-                <div class="transaction-item">
-                    <div><strong>${t.type.toUpperCase()}</strong> - ${new Date(t.date).toLocaleString()}</div>
-                    <div>${t.description || `${t.amount} GDS`}</div>
-                    <div class="amount ${t.amount > 0 ? 'positive' : 'negative'}">${t.amount > 0 ? '+' : ''}${t.amount.toLocaleString()} GDS</div>
-                </div>
-            `).join('');
+            const html = myTransactions.map(t => {
+                let typeLabel = '';
+                let amountValue = t.amount;
+                
+                switch(t.type) {
+                    case 'vente':
+                        typeLabel = '💰 VENTE';
+                        break;
+                    case 'paiement_gagnant':
+                        typeLabel = '🏆 PAIEMENT GAGNANT';
+                        amountValue = -Math.abs(t.amount);
+                        break;
+                    case 'dechargement':
+                        typeLabel = '📥 DÉCHARGEMENT';
+                        break;
+                    case 'transfert':
+                        if (t.from_point_id === currentUser?.id) {
+                            typeLabel = '🔄 TRANSFERT SORTANT';
+                            amountValue = -t.amount;
+                        } else {
+                            typeLabel = '🔄 TRANSFERT ENTRANT';
+                        }
+                        break;
+                    default:
+                        typeLabel = t.type.toUpperCase();
+                }
+                
+                return `
+                    <div class="transaction-item ${t.type}">
+                        <div><strong>${typeLabel}</strong> - ${new Date(t.date).toLocaleString()}</div>
+                        <div>${t.description || ''}</div>
+                        <div class="amount ${amountValue < 0 ? 'negative' : 'positive'}">
+                            ${amountValue < 0 ? '-' : '+'}${Math.abs(amountValue).toLocaleString()} GDS
+                        </div>
+                    </div>
+                `;
+            }).join('');
             
             document.getElementById('transactionsList').innerHTML = html || '<p>Aucune transaction</p>';
         }
@@ -398,20 +441,22 @@ async function loadDailyReport() {
     const today = new Date().toISOString().split('T')[0];
     
     try {
-        // Récupérer les transactions du jour pour ce point
         const response = await fetch(`${API_BASE_URL}/api/transactions`);
         const data = await response.json();
         
         if (data.success && data.transactions) {
-            const myTransactions = data.transactions.filter(t => 
-                t.payment_point_id === currentUser.id && 
-                new Date(t.date).toISOString().split('T')[0] === today
-            );
+            const myTransactions = data.transactions.filter(t => {
+                const isForThisPoint = t.payment_point_id === currentUser.id || 
+                                       t.from_point_id === currentUser.id ||
+                                       t.to_point_id === currentUser.id;
+                const isToday = new Date(t.date).toISOString().split('T')[0] === today;
+                return isForThisPoint && isToday;
+            });
             
             let sales = 0;
             let payouts = 0;
             let deposits = 0;
-            let transfers = 0;
+            let transfersOut = 0;
             
             myTransactions.forEach(t => {
                 switch(t.type) {
@@ -425,7 +470,14 @@ async function loadDailyReport() {
                         deposits += t.amount;
                         break;
                     case 'transfert':
-                        if (t.from_point_id === currentUser.id) transfers += t.amount;
+                        if (t.from_point_id === currentUser.id) {
+                            transfersOut += t.amount;
+                        }
+                        break;
+                    case 'alimentation_point':
+                        if (t.payment_point_id === currentUser.id) {
+                            deposits += t.amount;
+                        }
                         break;
                 }
             });
@@ -433,8 +485,12 @@ async function loadDailyReport() {
             document.getElementById('reportSales').innerHTML = sales.toLocaleString() + ' GDS';
             document.getElementById('reportPayouts').innerHTML = payouts.toLocaleString() + ' GDS';
             document.getElementById('reportDeposits').innerHTML = deposits.toLocaleString() + ' GDS';
-            document.getElementById('reportTransfers').innerHTML = transfers.toLocaleString() + ' GDS';
+            document.getElementById('reportTransfers').innerHTML = transfersOut.toLocaleString() + ' GDS';
             document.getElementById('reportBalance').innerHTML = currentPointBalance.toLocaleString() + ' GDS';
+            
+            // Mettre à jour aussi les stats du haut
+            document.getElementById('todaySales').innerHTML = sales.toLocaleString() + ' GDS';
+            document.getElementById('totalPayouts').innerHTML = payouts.toLocaleString() + ' GDS';
         }
     } catch (error) {
         console.error('Erreur chargement rapport:', error);
@@ -487,12 +543,17 @@ function printReport() {
 }
 
 function exportReportPDF() {
-    if (!window.jspdf || !window.jspdf.jsPDF) {
+    if (typeof window.jspdf === 'undefined' && typeof jspdf === 'undefined') {
         alert('Génération PDF non disponible. Veuillez rafraîchir la page.');
         return;
     }
     
-    const { jsPDF } = window.jspdf;
+    const { jsPDF } = window.jspdf || jspdf;
+    if (!jsPDF) {
+        alert('Erreur de chargement de jsPDF');
+        return;
+    }
+    
     const doc = new jsPDF();
     
     doc.setFontSize(18);
@@ -538,7 +599,7 @@ function logout() {
     document.getElementById('password').value = '';
 }
 
-// ========== TOUCHE ENTREE ==========
+// ========== INITIALISATION ==========
 document.addEventListener('DOMContentLoaded', function() {
     const usernameInput = document.getElementById('username');
     const passwordInput = document.getElementById('password');
@@ -553,7 +614,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (usernameInput) usernameInput.addEventListener('keypress', handleEnter);
     if (passwordInput) passwordInput.addEventListener('keypress', handleEnter);
     
-    // Support Entrée pour ajout de numéro
     const inputNumber = document.getElementById('inputNumber');
     if (inputNumber) {
         inputNumber.addEventListener('keypress', function(e) {
