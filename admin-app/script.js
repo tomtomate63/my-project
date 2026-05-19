@@ -1791,7 +1791,210 @@ async function loadPinsSection() {
     await loadAuthorizedDevices();
     await loadUnauthorizedDevices();
 }
+// ========== TRANSACTIONS ADMIN - NOUVELLES FONCTIONS ==========
 
+let currentTransactionsTab = 'admin';
+let currentAdminSubTab = 'all';
+
+function showTransactionsTab(tab) {
+    currentTransactionsTab = tab;
+    
+    // Cacher tous les contenus
+    document.getElementById('adminTransactions').style.display = 'none';
+    document.getElementById('ppTransactions').style.display = 'none';
+    
+    // Désactiver tous les boutons
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    
+    if (tab === 'admin') {
+        document.getElementById('adminTransactions').style.display = 'block';
+        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        loadAdminTransactions();
+    } else {
+        document.getElementById('ppTransactions').style.display = 'block';
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        loadPPTransactions();
+    }
+}
+
+function showAdminSubTab(subTab) {
+    currentAdminSubTab = subTab;
+    
+    // Désactiver tous les sous-boutons
+    document.querySelectorAll('.sub-tab-btn').forEach(btn => btn.classList.remove('active'));
+    
+    // Activer le bon bouton
+    const btns = document.querySelectorAll('.sub-tab-btn');
+    const index = { 'all': 0, 'sales': 1, 'transfers': 2, 'gains': 3, 'cancellations': 4 };
+    if (btns[index[subTab]]) btns[index[subTab]].classList.add('active');
+    
+    loadAdminTransactions();
+}
+
+async function loadAdminTransactions() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/transactions`);
+        const data = await response.json();
+        
+        if (data.success && data.transactions) {
+            let transactions = data.transactions;
+            const search = document.getElementById('filterAdminTransaction')?.value.toLowerCase();
+            const date = document.getElementById('filterAdminDate')?.value;
+            
+            // Filtrer selon la date
+            if (date) {
+                transactions = transactions.filter(t => new Date(t.date).toISOString().split('T')[0] === date);
+            }
+            
+            // Filtrer selon le sous-onglet
+            switch(currentAdminSubTab) {
+                case 'sales':
+                    transactions = transactions.filter(t => t.type === 'vente');
+                    break;
+                case 'transfers':
+                    transactions = transactions.filter(t => t.type === 'transfert' || t.type === 'alimentation_point');
+                    break;
+                case 'gains':
+                    transactions = transactions.filter(t => t.type === 'gain' || t.type === 'paiement_gagnant');
+                    break;
+                case 'cancellations':
+                    transactions = transactions.filter(t => t.type === 'annulation');
+                    break;
+                default:
+                    break;
+            }
+            
+            // Filtrer par recherche
+            if (search) {
+                transactions = transactions.filter(t => 
+                    t.description?.toLowerCase().includes(search) ||
+                    t.type?.toLowerCase().includes(search)
+                );
+            }
+            
+            // Calculer les totaux
+            let totalVentes = 0;
+            let totalGains = 0;
+            let totalTransferts = 0;
+            let totalAnnulations = 0;
+            
+            transactions.forEach(t => {
+                if (t.type === 'vente') totalVentes += t.amount;
+                if (t.type === 'gain' || t.type === 'paiement_gagnant') totalGains += Math.abs(t.amount);
+                if (t.type === 'transfert') totalTransferts += t.amount;
+                if (t.type === 'annulation') totalAnnulations += Math.abs(t.amount);
+            });
+            
+            const html = `
+                <div class="totals-bar">
+                    <div class="total-item">💰 Ventes: ${totalVentes.toLocaleString()} GDS</div>
+                    <div class="total-item">🏆 Gains: ${totalGains.toLocaleString()} GDS</div>
+                    <div class="total-item">🔄 Transferts: ${totalTransferts.toLocaleString()} GDS</div>
+                    <div class="total-item">❌ Annulations: ${totalAnnulations.toLocaleString()} GDS</div>
+                </div>
+                ${transactions.map(t => `
+                    <div class="transaction-item ${t.type}">
+                        <div class="transaction-header">
+                            <span class="transaction-type">${getTransactionTypeIcon(t.type)} ${t.type.toUpperCase()}</span>
+                            <span class="transaction-date">${new Date(t.date).toLocaleString()}</span>
+                        </div>
+                        <div class="transaction-details">
+                            ${t.description || ''}
+                            ${t.amount ? `<br><strong>Montant: ${Math.abs(t.amount).toLocaleString()} GDS</strong>` : ''}
+                            ${t.agent_name ? `<br>Agent: ${t.agent_name}` : ''}
+                            ${t.payment_point_name ? `<br>Point: ${t.payment_point_name}` : ''}
+                        </div>
+                    </div>
+                `).join('')}
+            `;
+            
+            document.getElementById('adminTransactionsList').innerHTML = html || '<p>Aucune transaction</p>';
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        document.getElementById('adminTransactionsList').innerHTML = '<p class="error">Erreur de chargement</p>';
+    }
+}
+
+async function loadPPTransactions() {
+    try {
+        // Récupérer les points de paiement
+        const pointsRes = await fetch(`${API_BASE_URL}/api/payment-points`);
+        const pointsData = await pointsRes.json();
+        
+        // Remplir le select des points
+        const ppSelect = document.getElementById('filterPP');
+        if (ppSelect && pointsData.success) {
+            ppSelect.innerHTML = '<option value="">Tous les points</option>' + 
+                pointsData.paymentPoints.map(p => `<option value="${p.id}">${p.nom}</option>`).join('');
+        }
+        
+        // Récupérer les transactions
+        const response = await fetch(`${API_BASE_URL}/api/transactions`);
+        const data = await response.json();
+        
+        if (data.success && data.transactions) {
+            let transactions = data.transactions;
+            const selectedPP = document.getElementById('filterPP')?.value;
+            const search = document.getElementById('filterPPTransaction')?.value.toLowerCase();
+            const date = document.getElementById('filterPPDate')?.value;
+            
+            // Filtrer par point de paiement
+            if (selectedPP) {
+                transactions = transactions.filter(t => 
+                    t.payment_point_id == selectedPP || 
+                    t.from_point_id == selectedPP || 
+                    t.to_point_id == selectedPP
+                );
+            }
+            
+            // Filtrer par date
+            if (date) {
+                transactions = transactions.filter(t => new Date(t.date).toISOString().split('T')[0] === date);
+            }
+            
+            // Filtrer par recherche
+            if (search) {
+                transactions = transactions.filter(t => 
+                    t.description?.toLowerCase().includes(search) ||
+                    t.type?.toLowerCase().includes(search)
+                );
+            }
+            
+            const html = transactions.map(t => {
+                let pointName = '';
+                if (t.payment_point_name) pointName = t.payment_point_name;
+                if (t.from_point_name) pointName = `De: ${t.from_point_name} → Vers: ${t.to_point_name}`;
+                
+                return `
+                    <div class="transaction-item ${t.type}">
+                        <div class="transaction-header">
+                            <span class="transaction-type">${getTransactionTypeIcon(t.type)} ${t.type.toUpperCase()}</span>
+                            <span class="transaction-date">${new Date(t.date).toLocaleString()}</span>
+                        </div>
+                        <div class="transaction-details">
+                            ${t.description || ''}
+                            ${pointName ? `<br><strong>Point:</strong> ${pointName}` : ''}
+                            ${t.amount ? `<br><strong>Montant: ${Math.abs(t.amount).toLocaleString()} GDS</strong>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('ppTransactionsList').innerHTML = html || '<p>Aucune transaction</p>';
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        document.getElementById('ppTransactionsList').innerHTML = '<p class="error">Erreur de chargement</p>';
+    }
+}
+
+// Ajouter les écouteurs d'événements pour les filtres
+document.getElementById('filterAdminTransaction')?.addEventListener('input', loadAdminTransactions);
+document.getElementById('filterAdminDate')?.addEventListener('change', loadAdminTransactions);
+document.getElementById('filterPP')?.addEventListener('change', loadPPTransactions);
+document.getElementById('filterPPTransaction')?.addEventListener('input', loadPPTransactions);
+document.getElementById('filterPPDate')?.addEventListener('change', loadPPTransactions);
 // ========== FONCTIONS UTILITAIRES ==========
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');

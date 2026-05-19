@@ -436,22 +436,44 @@
                 </div>
             </div>
             
-            <!-- TRANSACTIONS -->
+                       <!-- TRANSACTIONS -->
             <div id="transactionsSection" class="section" style="display: none;">
-                <div class="card">
-                    <h3><i class="fas fa-history"></i> Historique des transactions</h3>
-                    <div class="filters">
-                        <input type="text" id="filterTransaction" placeholder="Rechercher...">
-                        <select id="filterTransactionType">
-                            <option value="">Tous</option>
-                            <option value="vente">Ventes</option>
-                            <option value="dechargement">Déchargements</option>
-                            <option value="transfert">Transferts</option>
-                            <option value="gain">Gains</option>
-                            <option value="annulation">Annulations</option>
-                        </select>
+                <!-- Onglets -->
+                <div class="tabs">
+                    <button class="tab-btn active" onclick="showTransactionsTab('admin')">🏛️ Administration</button>
+                    <button class="tab-btn" onclick="showTransactionsTab('pp')">🏪 Points de Paiement</button>
+                </div>
+
+                <!-- Section Administration -->
+                <div id="adminTransactions" class="tab-content active">
+                    <div class="sub-tabs">
+                        <button class="sub-tab-btn active" onclick="showAdminSubTab('all')">📋 Tout</button>
+                        <button class="sub-tab-btn" onclick="showAdminSubTab('sales')">💰 Ventes totales</button>
+                        <button class="sub-tab-btn" onclick="showAdminSubTab('transfers')">🔄 Transferts</button>
+                        <button class="sub-tab-btn" onclick="showAdminSubTab('gains')">🏆 Gains</button>
+                        <button class="sub-tab-btn" onclick="showAdminSubTab('cancellations')">❌ Annulations</button>
                     </div>
-                    <div id="transactionsList"></div>
+                    <div class="card">
+                        <div class="filters">
+                            <input type="text" id="filterAdminTransaction" placeholder="Rechercher...">
+                            <input type="date" id="filterAdminDate" placeholder="Date">
+                        </div>
+                        <div id="adminTransactionsList" class="transactions-list"></div>
+                    </div>
+                </div>
+
+                <!-- Section Points de Paiement -->
+                <div id="ppTransactions" class="tab-content" style="display: none;">
+                    <div class="filters">
+                        <select id="filterPP">
+                            <option value="">Tous les points</option>
+                        </select>
+                        <input type="text" id="filterPPTransaction" placeholder="Rechercher...">
+                        <input type="date" id="filterPPDate" placeholder="Date">
+                    </div>
+                    <div class="card">
+                        <div id="ppTransactionsList" class="transactions-list"></div>
+                    </div>
                 </div>
             </div>
             
