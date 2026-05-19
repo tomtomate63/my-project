@@ -448,27 +448,7 @@ async function topupPettyCash() {
     }
 }
 
-    try {
-        showToast('Synchronisation en cours...', 'info');
-        
-        const response = await fetch(`${API_BASE_URL}/api/sync-petty-cash`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast(`✅ Petite caisse synchronisée ! Nouveau solde: ${data.netProfit.toLocaleString()} GDS`, 'success');
-            await loadDashboard();
-            await loadPettyCash();
-        } else {
-            showToast(data.message || '❌ Erreur lors de la synchronisation', 'error');
-        }
-    } catch (error) {
-        console.error('Erreur:', error);
-        showToast('Erreur de connexion', 'error');
-    }
+   
 async function topupFromProfit() {
     const amount = parseInt(document.getElementById('topupFromProfitAmount').value);
     const notes = document.getElementById('topupFromProfitNotes').value;
