@@ -13,53 +13,57 @@ if (!deviceId) {
     localStorage.setItem('deviceId', deviceId);
 }
 
-async function verifyPOSPin() {
-    let storedPin = localStorage.getItem('posPin');
-    
-    // Si pas de PIN stocké, demander à l'utilisateur
-    if (!storedPin) {
-        let enteredPin = prompt('🔒 ENTREZ LE CODE PIN DU POS :\n(Contactez l\'administrateur pour obtenir le code)');
-        if (!enteredPin) {
-            alert('Code PIN requis pour utiliser ce POS');
-            return false;
+function verifyPOSPin() {
+    return new Promise(function(resolve, reject) {
+        var storedPin = localStorage.getItem('posPin');
+        
+        // Si pas de PIN stocké, demander à l'utilisateur
+        if (!storedPin) {
+            var enteredPin = prompt('🔒 ENTREZ LE CODE PIN DU POS :\n(Contactez l\'administrateur pour obtenir le code)');
+            if (!enteredPin) {
+                alert('Code PIN requis pour utiliser ce POS');
+                resolve(false);
+                return;
+            }
+            // Nettoyer le code PIN (enlever les tirets, espaces, etc.)
+            enteredPin = enteredPin.replace(/-/g, '').replace(/\s/g, '');
+            localStorage.setItem('posPin', enteredPin);
+            storedPin = enteredPin;
         }
-        // Nettoyer le code PIN (enlever les tirets, espaces, etc.)
-        enteredPin = enteredPin.replace(/-/g, '').replace(/\s/g, '');
-        localStorage.setItem('posPin', enteredPin);
-        storedPin = enteredPin;
-    }
-    
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/verify-pos-pin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                pinCode: storedPin,
-                deviceId: deviceId,
-                posName: 'POS-' + deviceId.substring(0, 8)
-            })
+        
+        var url = API_BASE_URL + '/api/verify-pos-pin';
+        var body = JSON.stringify({
+            pinCode: storedPin,
+            deviceId: deviceId,
+            posName: 'POS-' + deviceId.substring(0, 8)
         });
         
-        const data = await response.json();
-        
-        if (!data.success) {
-            // PIN invalide, effacer et réessayer
-            localStorage.removeItem('posPin');
-            alert('❌ CODE PIN INVALIDE. Veuillez réessayer.');
-            return false;
-        }
-        
-        // Stocker le nom du POS pour référence
-        if (data.posName) {
-            localStorage.setItem('posName', data.posName);
-        }
-        
-        return true;
-    } catch (error) {
-        console.error('Erreur vérification PIN:', error);
-        alert('❌ Erreur de vérification. Impossible de vérifier le code PIN.\nVérifiez votre connexion internet.');
-        return false;
-    }
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                // Stocker le nom du POS pour référence
+                if (data.posName) {
+                    localStorage.setItem('posName', data.posName);
+                }
+                resolve(true);
+            } else {
+                // PIN invalide, effacer et réessayer
+                localStorage.removeItem('posPin');
+                alert('❌ CODE PIN INVALIDE. Veuillez réessayer.');
+                resolve(false);
+            }
+        })
+        .catch(function(error) {
+            console.error('Erreur vérification PIN:', error);
+            alert('❌ Erreur de vérification. Impossible de vérifier le code PIN.\nVérifiez votre connexion internet.');
+            resolve(false);
+        });
+    });
 }
 
 async function checkDeviceAuthorization() {
@@ -100,65 +104,70 @@ function updateDate() {
     }
 }
 
-async function login() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
+function login() {
+    var username = document.getElementById('username').value;
+    var password = document.getElementById('password').value;
     
-    const isPinValid = await verifyPOSPin();
-    if (!isPinValid) return;
-    
-    // ⚠️ TEMPORAIREMENT DÉSACTIVÉ - Pour permettre l'enregistrement de l'appareil
-    // const isDeviceAuthorized = await checkDeviceAuthorization();
-    // if (!isDeviceAuthorized) return;
-    
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                username, 
-                password,
-                deviceId: deviceId
-            })
+    // Vérifier le PIN d'abord
+    verifyPOSPin().then(function(isPinValid) {
+        if (!isPinValid) return;
+        
+        // ⚠️ TEMPORAIREMENT DÉSACTIVÉ - Pour permettre l'enregistrement de l'appareil
+        // checkDeviceAuthorization().then(function(isDeviceAuthorized) {
+        //     if (!isDeviceAuthorized) return;
+        // });
+        
+        var url = API_BASE_URL + '/api/login';
+        var body = JSON.stringify({
+            username: username,
+            password: password,
+            deviceId: deviceId
         });
         
-        const data = await response.json();
-        
-        if (data.success && !data.user.isAdmin) {
-            currentUser = data.user;
-            document.getElementById('agentInfo').innerHTML = `
-                <div class="agent-name"><i class="fas fa-user-circle"></i> ${currentUser.agentName || currentUser.name}</div>
-                <div class="agent-zone"><i class="fas fa-map-marker-alt"></i> ${currentUser.zone}</div>
-                <div class="agent-type"><i class="fas fa-tag"></i> ${currentUser.type === 'supervisor' ? 'Superviseur' : 'Vendeur'}</div>
-            `;
-            
-            if (currentUser.isBlocked) {
-                document.getElementById('blockedAlert').style.display = 'block';
-            }
-            
-            document.getElementById('loginPage').style.display = 'none';
-            document.getElementById('appPage').style.display = 'block';
-            
-            updateDate();
-            setInterval(updateDate, 60000);
-            
-            loadAgentStats();
-            loadTickets();
-            
-            setInterval(() => {
-                if (currentUser) {
-                    loadAgentStats();
-                    loadTickets();
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success && !data.user.isAdmin) {
+                currentUser = data.user;
+                document.getElementById('agentInfo').innerHTML = 
+                    '<div class="agent-name"><i class="fas fa-user-circle"></i> ' + (currentUser.agentName || currentUser.name) + '</div>' +
+                    '<div class="agent-zone"><i class="fas fa-map-marker-alt"></i> ' + currentUser.zone + '</div>' +
+                    '<div class="agent-type"><i class="fas fa-tag"></i> ' + (currentUser.type === 'supervisor' ? 'Superviseur' : 'Vendeur') + '</div>';
+                
+                if (currentUser.isBlocked) {
+                    document.getElementById('blockedAlert').style.display = 'block';
                 }
-            }, 30000);
-        } else {
-            document.getElementById('errorMsg').textContent = data.message || 'Identifiants incorrects';
+                
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('appPage').style.display = 'block';
+                
+                updateDate();
+                setInterval(updateDate, 60000);
+                
+                loadAgentStats();
+                loadTickets();
+                
+                setInterval(function() {
+                    if (currentUser) {
+                        loadAgentStats();
+                        loadTickets();
+                    }
+                }, 30000);
+            } else {
+                document.getElementById('errorMsg').textContent = data.message || 'Identifiants incorrects';
+                document.getElementById('errorMsg').style.display = 'block';
+            }
+        })
+        .catch(function(error) {
+            console.error('Erreur:', error);
+            document.getElementById('errorMsg').textContent = 'Erreur de connexion au serveur';
             document.getElementById('errorMsg').style.display = 'block';
-        }
-    } catch (error) {
-        document.getElementById('errorMsg').textContent = 'Erreur de connexion au serveur';
-        document.getElementById('errorMsg').style.display = 'block';
-    }
+        });
+    });
 }
 
 async function makeDeposit() {
